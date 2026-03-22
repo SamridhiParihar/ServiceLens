@@ -2,6 +2,8 @@
 
 > AI-powered code intelligence for Java backends. Ask questions about your codebase in plain English — get answers grounded in real code, not hallucinations.
 
+React frontend for [ServiceLens](https://github.com/sha0urya/ServiceLens-ui)
+
 ---
 
 ## What It Does
