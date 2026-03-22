@@ -1,0 +1,57 @@
+spring:
+  application:
+    name: servicelens
+  main:
+    allow-bean-definition-overriding: true
+
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: servicelens
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/servicelens
+    username: servicelens
+    password: servicelens
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: phi3
+        options:
+          temperature: 0.1      # low temp = more precise answers
+          num-ctx: 4096
+      embedding:
+        model: nomic-embed-text
+
+    vectorstore:
+      pgvector:
+        initialize-schema: true
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 768           # nomic-embed-text output size (it should match)
+
+servicelens:
+  data-path: ./servicelens-data
+  groq:
+    api-key: ${your_api_key}
+    model: llama-3.3-70b-versatile
+
+logging:
+  level:
+    com.servicelens: INFO
+    com.servicelens.cfg: WARN           # suppress CFG debug noise
+    com.servicelens.dfg: WARN           # suppress DFG debug noise
+    org.springframework.ai: WARN
+    org.neo4j: WARN
+    org.hibernate: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

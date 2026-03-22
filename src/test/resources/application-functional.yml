@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Functional-test profile  (activated via @ActiveProfiles("functional"))
+#
+# ALL infrastructure is REAL — no fakes, no mocks:
+#   - PostgreSQL + pgvector  → Testcontainers (pgvector/pgvector:pg16)
+#   - Neo4j                  → Testcontainers (neo4j:5.15.0)
+#   - Ollama                 → must be running on localhost:11434
+#                              with nomic-embed-text and phi3 pulled
+#
+# DB URLs and Neo4j credentials are injected at runtime by @DynamicPropertySource.
+# Tests skip automatically (via Assumptions) if Ollama is unreachable.
+# ─────────────────────────────────────────────────────────────────────────────
+
+spring:
+  # ── Database (PostgreSQL + pgvector) ───────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://localhost:5432/servicelens
+    username: servicelens
+    password: servicelens
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+  # ── Neo4j ──────────────────────────────────────────────────────────────────
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: servicelens
+
+  # ServiceLensConfig defines its own vectorStore bean; PgVectorStoreAutoConfiguration
+  # also tries to register one.  Override is required to let ServiceLensConfig win.
+  main:
+    allow-bean-definition-overriding: true
+
+  # ── Spring AI / Ollama — real connection, real models ────────────────────────
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: phi3
+      embedding:
+        model: nomic-embed-text
+    vectorstore:
+      pgvector:
+        dimensions: 768
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        initialize-schema: true
+
+# ── ServiceLens internals ─────────────────────────────────────────────────────
+servicelens:
+  # Fingerprinter writes to this path; overridden by @DynamicPropertySource
+  # to a per-test temp directory so tests never pollute ~/servicelens-data.
+  data-path: ./servicelens-test-data
+
+# ── Logging — reduce noise during functional test runs ───────────────────────
+logging:
+  level:
+    com.servicelens: INFO
+    org.springframework.ai: WARN
+    org.springframework.data.neo4j: WARN
+    org.neo4j.driver: WARN
+    org.testcontainers: INFO
+    com.zaxxer.hikari: WARN

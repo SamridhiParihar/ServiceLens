@@ -1,0 +1,461 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "ServiceLens API — Task Manager Analysis",
+    "description": "Postman collection for ServiceLens — AI-powered code intelligence platform.\nTarget codebase: **Task Manager** (Spring Boot + MongoDB)\n\n**Setup:**\n1. Start ServiceLens on port 8080 (with Ollama, pgvector, Neo4j running)\n2. Run Full Ingest to index the task-manager codebase\n3. Use Query / Ask endpoints to explore the task-manager code\n\n**Variables to configure:**\n- `baseUrl` — ServiceLens host (default: http://localhost:8080)\n- `serviceName` — logical name (default: task-manager)\n- `repoPath` — absolute path to the task-manager repo on disk",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",     "value": "http://localhost:8080",                                    "type": "string" },
+    { "key": "serviceName", "value": "task-manager",                                             "type": "string" },
+    { "key": "repoPath",    "value": "/Users/apple/Desktop/intern_project_/task-manager",        "type": "string" }
+  ],
+  "item": [
+
+    {
+      "name": "Ingestion",
+      "description": "Index the task-manager codebase into ServiceLens. Run Full Ingest first, then Incremental Ingest for subsequent runs.",
+      "item": [
+        {
+          "name": "Full Ingest — task-manager",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ingest", "host": ["{{baseUrl}}"], "path": ["api", "ingest"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"repoPath\": \"{{repoPath}}\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Full re-ingest of the task-manager repository.\n\n1. Purges all existing pgvector chunks and Neo4j nodes for task-manager\n2. Walks the repo, processes Java / YAML / SQL / Markdown files\n3. Saves ClassNode + MethodNode graph to Neo4j\n4. Embeds CODE and DOCUMENTATION chunks into pgvector\n\n**Note:** Takes several minutes — embedding is the bottleneck."
+          },
+          "response": []
+        },
+        {
+          "name": "Incremental Ingest — task-manager",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ingest/incremental", "host": ["{{baseUrl}}"], "path": ["api", "ingest", "incremental"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"repoPath\": \"{{repoPath}}\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Incremental ingestion — only processes files whose SHA-256 hash changed since the last run. Much faster after the initial full ingest.\n\n**Response:** `{ serviceName, added, modified, deleted, unchanged, totalChanged }`"
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "Query — Raw Retrieval",
+      "description": "GET /api/retrieve — simple vector similarity search, no intent classification.",
+      "item": [
+        {
+          "name": "Retrieve — task creation logic",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/retrieve?query=how does task creation work&serviceName={{serviceName}}&topK=8",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "retrieve"],
+              "query": [
+                { "key": "query",       "value": "how does task creation work" },
+                { "key": "serviceName", "value": "{{serviceName}}" },
+                { "key": "topK",        "value": "8" }
+              ]
+            },
+            "description": "Raw cosine-similarity search for task creation logic."
+          },
+          "response": []
+        },
+        {
+          "name": "Retrieve — JWT authentication",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/retrieve?query=JWT token authentication and validation&serviceName={{serviceName}}&topK=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "retrieve"],
+              "query": [
+                { "key": "query",       "value": "JWT token authentication and validation" },
+                { "key": "serviceName", "value": "{{serviceName}}" },
+                { "key": "topK",        "value": "5" }
+              ]
+            },
+            "description": "Raw vector search for JWT/auth-related code."
+          },
+          "response": []
+        },
+        {
+          "name": "Retrieve — role-based authorization",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/retrieve?query=role based access control ADMIN REPORTER REPORTEE&serviceName={{serviceName}}&topK=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "retrieve"],
+              "query": [
+                { "key": "query",       "value": "role based access control ADMIN REPORTER REPORTEE" },
+                { "key": "serviceName", "value": "{{serviceName}}" },
+                { "key": "topK",        "value": "5" }
+              ]
+            },
+            "description": "Raw vector search for RBAC logic."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "Query — Intent Based",
+      "description": "POST /api/query — classifies intent, then dispatches to vector search + Neo4j graph traversal. Returns structured results, no LLM call.",
+      "item": [
+        {
+          "name": "Find Implementation — task creation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does task creation and validation work in TaskService\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **FIND_IMPLEMENTATION**\n\nReturns CODE chunks from TaskService showing task creation logic."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Implementation — invitation flow",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does the invitation system work with email tokens\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **FIND_IMPLEMENTATION**\n\nReturns chunks about invitation creation, token generation, and acceptance."
+          },
+          "response": []
+        },
+        {
+          "name": "Trace Callers — who calls createTask",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what calls createTask\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **TRACE_CALLERS**\n\nReturns `callers` list from Neo4j CALLS relationships."
+          },
+          "response": []
+        },
+        {
+          "name": "Trace Call Chain — what does register call",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what does the register method call downstream\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **TRACE_CALL_CHAIN**\n\nReturns `callChain` — downstream methods called from the registration endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Endpoints — all REST APIs",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what REST API endpoints does this service expose\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **FIND_ENDPOINTS**\n\nReturns `endpointMethods` — all @PostMapping, @GetMapping, @PatchMapping, @DeleteMapping handlers from Neo4j."
+          },
+          "response": []
+        },
+        {
+          "name": "Find Configuration — MongoDB and JWT config",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how is MongoDB and JWT token expiry configured\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **FIND_CONFIGURATION**\n\nReturns CONFIG chunks from application.yml / application.properties."
+          },
+          "response": []
+        },
+        {
+          "name": "Impact Analysis — changing TaskService",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what would break if I change TaskService\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **IMPACT_ANALYSIS**\n\nReturns `impactedClasses` — classes that depend on TaskService."
+          },
+          "response": []
+        },
+        {
+          "name": "Debug Error — authorization failures",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"why would I get a 403 Forbidden when a REPORTEE tries to create a task\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **DEBUG_ERROR**\n\nReturns CODE chunks relevant to role-based authorization checking."
+          },
+          "response": []
+        },
+        {
+          "name": "Understand Business Rule — member roles",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what are the different member roles and what can each role do\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected intent: **UNDERSTAND_BUSINESS_RULE**\n\nReturns chunks explaining ADMIN / REPORTER / REPORTEE role permissions."
+          },
+          "response": []
+        },
+        {
+          "name": "Validation — Blank Query (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected: **400 Bad Request** — `query` must not be blank."
+          },
+          "response": []
+        },
+        {
+          "name": "Validation — Blank Service Name (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/query", "host": ["{{baseUrl}}"], "path": ["api", "query"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does task creation work\",\n  \"serviceName\": \"\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected: **400 Bad Request** — `serviceName` must not be blank."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "Ask — LLM Synthesis",
+      "description": "POST /api/ask — full RAG pipeline: retrieve → assemble context → Ollama LLM → natural language answer.\n\nRequires Ollama running with the configured model (default: llama3).\n\n**Response includes:** answer, synthesized flag, intent, modelUsed, contextChunksUsed, and full nested retrieval result.",
+      "item": [
+        {
+          "name": "Ask — How does task creation work",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does task creation work including validation and role checks\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Full RAG answer about task creation flow — from controller through service to repository."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — How does JWT authentication work",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does JWT authentication work including token generation and validation\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Full RAG answer about the JWT auth flow — registration, login, token creation, filter chain validation."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — What calls assignUsers",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what calls the assign users to task method and under what conditions\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "TRACE_CALLERS intent with LLM synthesis. Explains the caller chain for task assignment."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Explain all REST endpoints",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"list and explain all REST API endpoints in this service\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "FIND_ENDPOINTS with LLM synthesis. Returns a human-readable description of every controller endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Invitation flow end to end",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"explain the complete invitation flow from sending an invite to a user accepting it\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Full RAG answer tracing the invitation lifecycle — send, email token, accept, member creation."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Role permissions explained",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"explain the ADMIN REPORTER and REPORTEE roles and what each can and cannot do\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "UNDERSTAND_BUSINESS_RULE intent. LLM explains role permissions in plain business terms."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Why 403 on task status change",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"why would a REPORTEE get 403 Forbidden when trying to change status of a task they are not assigned to\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "DEBUG_ERROR with LLM synthesis. Diagnoses the authorization check path and explains when/why 403 is thrown."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Impact of changing ProjectService",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"what would be impacted if I refactor ProjectService\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "IMPACT_ANALYSIS with LLM synthesis. Lists dependent classes grouped by layer."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Activity logging mechanism",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does the activity feed logging work and what events are tracked\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Full RAG answer about the activity tracking system — what triggers activity logs, what metadata is stored."
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Fallback (unindexed service)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"how does anything work\",\n  \"serviceName\": \"never-ingested-service\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "No-context fallback. LLM is NOT called — returns `synthesized: false` with guidance message.\n\nExpected: `{ \"synthesized\": false, \"answer\": \"No relevant code found...\", \"modelUsed\": \"none\" }`"
+          },
+          "response": []
+        },
+        {
+          "name": "Ask — Validation: blank query (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"\",\n  \"serviceName\": \"{{serviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Expected: **400 Bad Request** — `query` must not be blank."
+          },
+          "response": []
+        }
+      ]
+    }
+
+  ]
+}
