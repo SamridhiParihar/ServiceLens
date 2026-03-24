@@ -18,7 +18,7 @@ Represents any Java type: class, interface, enum, record, or annotation.
 | `simpleName` | String | Short name (`OrderService`) |
 | `packageName` | String | Package (`com.example`) |
 | `filePath` | String | Absolute source file path |
-| `serviceName` | String | Logical service name (ingestion label) |
+| `serviceName` | String | Logical service name (isolation key) |
 | `isAbstract` | boolean | Whether the class is abstract |
 | `isPublic` | boolean | Whether the class is public |
 | `isInterface` | boolean | Whether it is an interface |
@@ -95,7 +95,7 @@ Represents a basic block in a method's control flow graph. See [cfg.md](cfg.md) 
 | Method | What it does |
 |---|---|
 | `saveFileResult(result)` | Persists all nodes from one file's ingestion result |
-| `deleteServiceGraph(serviceName)` | Removes all nodes for a logical service |
+| `deleteServiceGraph(serviceName)` | Removes all nodes/relationships for a service (delegates to `GraphDeleter`) |
 | `deleteByFilePath(filePath)` | Removes all nodes for one file (used in incremental ingestion) |
 | `findCallers(methodQN)` | Returns all methods with a `CALLS` edge to this method |
 | `findCallChain(methodQN, serviceName)` | BFS/DFS forward traversal of `CALLS` edges (depth 5) |
@@ -107,6 +107,37 @@ Represents a basic block in a method's control flow graph. See [cfg.md](cfg.md) 
 | `findHighComplexityMethods(serviceName, minComplexity)` | Returns methods above cyclomatic complexity threshold |
 | `getCfgForMethod(methodQN)` | Returns full CFG subgraph for one method |
 | `getServiceStats(serviceName)` | Returns aggregate stats (class count, method count, endpoint count, etc.) |
+
+---
+
+## Service Graph Deletion — GraphDeleter
+
+`deleteServiceGraph(serviceName)` delegates to `GraphDeleter`, which runs batched `DETACH DELETE` queries until all nodes for the service are gone.
+
+### Why label-specific queries?
+
+Neo4j indexes are label-scoped. A query like:
+```cypher
+MATCH (n {serviceName: $serviceName}) DETACH DELETE n
+```
+performs a **full graph scan** because there is no label — Neo4j cannot use any index. On large graphs this causes connection timeouts (tested: 2.5+ minutes for a 600-file service).
+
+`GraphDeleter` instead runs **three separate label-specific queries**:
+```cypher
+MATCH (n:CfgNode  {serviceName: $serviceName}) WITH n LIMIT 500 DETACH DELETE n RETURN count(n) AS deleted
+MATCH (n:Method   {serviceName: $serviceName}) WITH n LIMIT 500 DETACH DELETE n RETURN count(n) AS deleted
+MATCH (n:Class    {serviceName: $serviceName}) WITH n LIMIT 500 DETACH DELETE n RETURN count(n) AS deleted
+```
+
+Each query hits a dedicated index (`class_service`, `method_service`, `cfg_service`) and completes in milliseconds. Deletion loops until all labels return 0.
+
+### Why DETACH DELETE instead of SDN repositories?
+
+Spring Data Neo4j repositories load entire entities into memory before deleting them (N+1 queries). For a 600-file service this means thousands of `MATCH` queries to load entities followed by individual `DELETE` calls — the root cause of the original `ConnectionReadTimeoutException` after 2.5 minutes. `DETACH DELETE` runs entirely server-side: one Cypher statement, no entity materialisation, no JVM memory pressure.
+
+### Why no `@Transactional` on GraphDeleter?
+
+`Neo4jClient` auto-manages a transaction per query. Wrapping the entire multi-batch loop in `@Transactional(REQUIRES_NEW)` keeps a connection checked out for the full loop duration, which exhausts the connection pool under load and produces `BoltServiceUnavailableException` (connection establishment timeout). Removing the annotation lets each batch run in its own auto-committed transaction.
 
 ---
 
@@ -165,4 +196,14 @@ This keeps Neo4j's transaction size predictable and avoids JVM stack issues.
 
 ## Indexes and Constraints
 
-All primary key fields (`qualifiedName` on `Class` and `Method`, `id` on `CfgNode`) are backed by Neo4j uniqueness constraints created automatically by Spring Data Neo4j on first startup.
+Primary key fields (`qualifiedName` on `Class` and `Method`, `id` on `CfgNode`) are backed by uniqueness constraints created automatically by Spring Data Neo4j on first startup.
+
+Additional `serviceName` indexes are created by `Neo4jConfig` on startup to support fast label-specific deletion and retrieval:
+
+| Index name | Label | Property |
+|---|---|---|
+| `class_service` | `Class` | `serviceName` |
+| `method_service` | `Method` | `serviceName` |
+| `cfg_service` | `CfgNode` | `serviceName` |
+
+All three are created with `CREATE INDEX ... IF NOT EXISTS`, so they are idempotent across restarts.

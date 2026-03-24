@@ -10,16 +10,33 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.*;
-import java.util.HashMap;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Core ingestion pipeline: walks a repository tree, processes all supported
+ * file types, writes graph nodes to Neo4j, and embeds code and documentation
+ * chunks into pgvector.
+ *
+ * <h3>Single responsibility</h3>
+ * <p>This pipeline is a pure <em>write</em> operation — it only adds data.
+ * It never purges existing data. Purging is the responsibility of
+ * {@link ServiceDeletionService}, which is invoked by
+ * {@link IngestionController} when the resolved strategy requires it
+ * (i.e. {@link IngestionStrategy#FORCE_FULL}).</p>
+ *
+ * <h3>Supported file types</h3>
+ * <p>Java (full AST + CFG + DFG analysis), YAML, Markdown, SQL, OpenAPI.</p>
+ *
+ * <h3>Skipped directories</h3>
+ * <p>{@code target}, {@code build}, {@code .git}, {@code .idea},
+ * {@code node_modules}, {@code .mvn}, {@code out}, {@code dist}, {@code .gradle}.</p>
+ */
 @Service
 public class IngestionPipeline {
 
@@ -34,14 +51,12 @@ public class IngestionPipeline {
     private final VectorStore vectorStore;
     private final KnowledgeGraphService graphService;
     private final JavaFileProcessor javaProcessor;
-    private final JdbcTemplate jdbcTemplate;
     private final FileFingerprinter fingerprinter;
 
     public IngestionPipeline(List<FileProcessor> processors,
                              VectorStore vectorStore,
                              KnowledgeGraphService graphService,
                              JavaFileProcessor javaProcessor,
-                             JdbcTemplate jdbcTemplate,
                              FileFingerprinter fingerprinter) {
         this.processors   = processors.stream()
                 .sorted(Comparator.comparingInt(FileProcessor::priority).reversed())
@@ -49,20 +64,29 @@ public class IngestionPipeline {
         this.vectorStore   = vectorStore;
         this.graphService  = graphService;
         this.javaProcessor = javaProcessor;
-        this.jdbcTemplate  = jdbcTemplate;
         this.fingerprinter = fingerprinter;
     }
 
+    /**
+     * Walk {@code repoRoot}, process all supported files, and write the results
+     * to Neo4j and pgvector.
+     *
+     * <p>No purge is performed here. The caller ({@link IngestionController}) is
+     * responsible for purging stale data before calling this method when the
+     * strategy requires it.</p>
+     *
+     * @param repoRoot    root directory of the repository to ingest
+     * @param serviceName logical identifier for the service being ingested
+     * @return a summary of what was indexed
+     */
     public IngestionResult ingest(Path repoRoot, String serviceName) {
         log.info("═══ Starting ingestion: {} ═══", serviceName);
-        purgeService(serviceName);
 
         List<CodeChunk> allChunks         = new ArrayList<>();
-        List<Document> allDocChunks       = new ArrayList<>(); // Javadoc docs
-        List<CfgNode> allCfgNodes         = new ArrayList<>();
+        List<Document>  allDocChunks      = new ArrayList<>();
+        List<CfgNode>   allCfgNodes       = new ArrayList<>();
         Map<String, String> currentHashes = new HashMap<>();
 
-        // For graph
         var allClassNodes  = new ArrayList<com.servicelens.graph.domain.ClassNode>();
         var allMethodNodes = new ArrayList<com.servicelens.graph.domain.MethodNode>();
         var allDataFlows   = new ArrayList<com.servicelens.dfg.MethodDataFlow>();
@@ -78,23 +102,19 @@ public class IngestionPipeline {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes a) {
                     if (javaProcessor.supports(file)) {
-                        // ── Java: full processing ──────────────────────────
                         JavaFileProcessor.JavaFileResult result =
                                 javaProcessor.processFile(file, serviceName);
-
                         allChunks.addAll(result.chunks());
                         allDocChunks.addAll(result.documentationChunks());
                         allClassNodes.addAll(result.classNodes());
                         allMethodNodes.addAll(result.methodNodes());
                         allCfgNodes.addAll(result.cfgNodes());
                         allDataFlows.addAll(result.dataFlows());
-
                         log.debug("Java: {} → {} chunks, {} doc chunks, {} classes, {} methods, {} cfg nodes",
                                 file.getFileName(),
                                 result.chunks().size(), result.documentationChunks().size(),
                                 result.classNodes().size(), result.methodNodes().size(),
                                 result.cfgNodes().size());
-
                         recordHash(file, currentHashes);
                     } else {
                         processors.stream()
@@ -105,8 +125,7 @@ public class IngestionPipeline {
                                     try {
                                         allChunks.addAll(p.process(file, serviceName));
                                         recordHash(file, currentHashes);
-                                    }
-                                    catch (Exception e) {
+                                    } catch (Exception e) {
                                         log.warn("Failed: {} — {}", file.getFileName(), e.getMessage());
                                     }
                                 });
@@ -128,16 +147,15 @@ public class IngestionPipeline {
 
         // ── Step 2: Embed and store code chunks ─────────────────────────────
         log.info("Embedding {} code chunks into pgvector", allChunks.size());
-        List<Document> codeDocs = allChunks.stream()
-                .map(CodeChunk::toDocument).collect(Collectors.toList());
-        storeInBatches(codeDocs, "code");
+        storeInBatches(allChunks.stream().map(CodeChunk::toDocument).collect(Collectors.toList()), "code");
 
-        // ── Step 3: Embed and store documentation chunks separately ─────────
+        // ── Step 3: Embed and store documentation chunks ────────────────────
         log.info("Embedding {} documentation chunks into pgvector", allDocChunks.size());
         storeInBatches(allDocChunks, "documentation");
 
+        // ── Step 4: Persist file hashes for future incremental runs ─────────
         fingerprinter.saveHashes(serviceName, currentHashes);
-        log.info("═══ Ingestion complete for: {} — {} file hashes saved ═══", serviceName, currentHashes.size());
+        log.info("═══ Ingestion complete: {} — {} files hashed ═══", serviceName, currentHashes.size());
 
         return new IngestionResult(
                 serviceName,
@@ -150,29 +168,14 @@ public class IngestionPipeline {
         );
     }
 
+    // ── private helpers ───────────────────────────────────────────────────────
+
     private void recordHash(Path file, Map<String, String> hashes) {
         try {
             hashes.put(file.toAbsolutePath().toString(), fingerprinter.computeHash(file));
         } catch (IOException e) {
             log.warn("Could not hash file {}: {}", file.getFileName(), e.getMessage());
         }
-    }
-
-    /**
-     * Deletes all existing data for a service before re-ingesting.
-     *
-     * <p>Prevents duplicate chunks and graph nodes when the same service is
-     * ingested more than once via the full ingest endpoint.</p>
-     *
-     * @param serviceName the service whose prior data should be removed
-     */
-    private void purgeService(String serviceName) {
-        log.info("Purging existing data for service: {}", serviceName);
-        graphService.deleteServiceGraph(serviceName);
-        jdbcTemplate.update(
-                "DELETE FROM vector_store WHERE metadata->>'service_name' = ?",
-                serviceName);
-        log.debug("Purge complete for service: {}", serviceName);
     }
 
     private void storeInBatches(List<Document> docs, String label) {
@@ -193,6 +196,8 @@ public class IngestionPipeline {
         return chunks.stream().collect(
                 Collectors.groupingBy(c -> c.chunkType().name(), Collectors.counting()));
     }
+
+    // ── result record ─────────────────────────────────────────────────────────
 
     public record IngestionResult(
             String serviceName,

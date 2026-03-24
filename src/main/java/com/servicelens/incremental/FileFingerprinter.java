@@ -157,6 +157,25 @@ public class FileFingerprinter {
         saveHashes(serviceName, hashes);
     }
 
+    /**
+     * Delete the entire hash file for a service.
+     *
+     * <p>Called by {@link com.servicelens.ingestion.ServiceDeletionService} when a
+     * service is deleted or force re-ingested so the next ingestion starts from a
+     * clean hash baseline.</p>
+     *
+     * @param serviceName the logical service name whose hash file should be removed
+     */
+    public void clearHashes(String serviceName) {
+        Path hashFile = getHashFilePath(serviceName);
+        try {
+            Files.deleteIfExists(hashFile);
+            log.debug("Cleared hash file for service: {}", serviceName);
+        } catch (IOException e) {
+            log.warn("Could not clear hash file for {}: {}", serviceName, e.getMessage());
+        }
+    }
+
     private Path getHashFilePath(String serviceName) {
         return Path.of(dataPath, serviceName, "file-hashes.json");
     }

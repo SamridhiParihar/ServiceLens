@@ -29,10 +29,15 @@ ServiceLens ingests your Java service into a hybrid knowledge store — a **Neo4
 Source Code
     │
     ▼
-JavaParser (AST) + CfgBuilder + DfgBuilder
-    ├─► ClassNode / MethodNode ─────────────────────► Neo4j
-    ├─► CfgNode / CFG_EDGE ─────────────────────────► Neo4j
-    └─► CodeChunk / DocChunk ──► Ollama embed ───────► pgvector
+IngestionStrategyResolver
+    ├─ FRESH (first time)        ─┐
+    ├─ INCREMENTAL (diff only)    ├─► JavaParser (AST) + CfgBuilder + DfgBuilder
+    └─ FORCE_FULL (purge+reingest)┘       ├─► ClassNode / MethodNode ──────► Neo4j
+                                          ├─► CfgNode / CFG_EDGE ──────────► Neo4j
+                                          └─► CodeChunk / DocChunk ─► Ollama ► pgvector
+                                          │
+                                          ├─► FileFingerprinter (SHA-256 hashes)
+                                          └─► Service Registry (PostgreSQL)
 
 Query
     │
@@ -63,8 +68,9 @@ Structured Answer (intent + confidence + model + context chunk count)
 | Language | Java 21 |
 | Framework | Spring Boot 3.5 + Spring AI 1.0 |
 | AST Parsing | JavaParser 3.25 (Java 18 level) |
-| Graph DB | Neo4j (Spring Data Neo4j) |
+| Graph DB | Neo4j (Spring Data Neo4j + Neo4jClient) |
 | Vector DB | PostgreSQL + pgvector (HNSW, cosine) |
+| Service Registry | PostgreSQL (JdbcTemplate) |
 | Embeddings | Ollama — `nomic-embed-text` (768 dims, local) |
 | LLM Chat | Groq — `llama-3.3-70b-versatile` |
 | Local LLM | Ollama — `phi3` (cross-encoder reranking) |
@@ -72,22 +78,51 @@ Structured Answer (intent + confidence + model + context chunk count)
 
 ---
 
-## Quick Start
+## Infrastructure
 
-**Prerequisites:** Java 21, Maven, PostgreSQL with pgvector, Ollama, Groq API key.
+Both databases are defined in `docker-compose.yml` at the project root.
 
 ```bash
-# 1. Pull embedding and chat models
+# Start PostgreSQL (pgvector) + Neo4j
+docker compose up -d
+
+# Stop both (data is preserved in Docker volumes)
+docker compose down
+
+# Wipe all data and start fresh
+docker compose down -v && docker compose up -d
+```
+
+Docker Compose is smart — if a container is already running and its config hasn't changed, it leaves it untouched and only starts what's missing.
+
+| Container | Image | Ports | Credentials |
+|---|---|---|---|
+| `pgvector` | pgvector/pgvector:pg16 | 5432 | user: `servicelens` / pass: `servicelens` / db: `servicelens` |
+| `neo4j` | neo4j:5.15 | 7474 (Browser), 7687 (Bolt) | user: `neo4j` / pass: `servicelens` |
+
+Neo4j Browser (inspect data manually) → `http://localhost:7474`
+
+---
+
+## Quick Start
+
+**Prerequisites:** Java 21, Maven, Docker, Ollama, Groq API key.
+
+```bash
+# 1. Start databases
+docker compose up -d
+
+# 2. Pull embedding and chat models
 ollama pull nomic-embed-text
 ollama pull phi3
 
-# 2. Set your Groq API key
+# 3. Set your Groq API key
 export GROQ_API_KEY=your_key_here
 
-# 3. Start the application
+# 4. Start the application
 ./mvnw spring-boot:run
 
-# 4. Ingest your Java service
+# 4. Ingest your Java service (first run — automatically detected as FRESH)
 curl -X POST http://localhost:8080/api/ingest \
   -H "Content-Type: application/json" \
   -d '{"repoPath": "/path/to/your/service", "serviceName": "my-service"}'
@@ -98,11 +133,27 @@ curl -X POST http://localhost:8080/api/ask \
   -d '{"query": "Who calls processPayment?", "serviceName": "my-service"}'
 ```
 
-For subsequent runs after code changes, use incremental ingestion (~32x faster):
+After making code changes, re-run the same ingest command — it automatically detects the service is already registered and runs incremental ingestion (~32× faster):
 ```bash
-curl -X POST http://localhost:8080/api/ingest/incremental \
+curl -X POST http://localhost:8080/api/ingest \
   -H "Content-Type: application/json" \
   -d '{"repoPath": "/path/to/your/service", "serviceName": "my-service"}'
+```
+
+To force a full re-index (clears all existing data and re-ingests everything):
+```bash
+curl -X POST http://localhost:8080/api/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"repoPath": "/path/to/your/service", "serviceName": "my-service", "force": "true"}'
+```
+
+To list all ingested services or delete one:
+```bash
+# List all services
+curl http://localhost:8080/api/services
+
+# Delete a service (removes all Neo4j nodes, vectors, hashes, and registry entry)
+curl -X DELETE http://localhost:8080/api/services/my-service
 ```
 
 ---
@@ -175,10 +226,11 @@ For other file types:
 | Doc | Description |
 |---|---|
 | [Architecture Overview](docs/architecture-overview.md) | Full system design, layer breakdown, data flow |
+| [Service Registry](docs/service-registry.md) | Service lifecycle, strategy resolution, deletion modes, multi-service isolation |
+| [Ingestion Pipeline](docs/ingestion-pipeline.md) | FRESH / INCREMENTAL / FORCE_FULL strategies, file processors, hash fingerprinting |
+| [Knowledge Graph](docs/knowledge-graph.md) | Neo4j schema: nodes, relationships, GraphDeleter, indexes |
 | [CFG — Control Flow Graph](docs/cfg.md) | How CFG is built, persisted, and queried |
 | [DFG — Data Flow Graph](docs/dfg.md) | Variable def/use analysis, null safety, taint tracing |
-| [Knowledge Graph](docs/knowledge-graph.md) | Neo4j schema: nodes, relationships, queries |
-| [Ingestion Pipeline](docs/ingestion-pipeline.md) | Full + incremental ingestion, file processors |
 | [Retrieval & Intent](docs/retrieval-and-intent.md) | Intent classification, 11 retrieval handlers, reranking |
 | [Answer Synthesis](docs/answer-synthesis.md) | Context assembly, prompt templates, Groq integration |
 | [API Reference](docs/api-reference.md) | All REST endpoints with request/response shapes |
@@ -196,6 +248,12 @@ LLM classification adds ~500ms latency on every query. Engineering query intents
 
 **Why Groq for chat but Ollama for embeddings?**
 Groq provides fast remote inference for the synthesis step (quality matters, one call per query). Ollama provides free, private, local embeddings (called thousands of times during ingestion — cost and privacy both matter).
+
+**Why does the ingestion pipeline never purge?**
+`IngestionPipeline` is a pure write — it never deletes existing data. Purging is `ServiceDeletionService`'s responsibility, called only when explicitly needed (FORCE_FULL or DELETE endpoint). This separation means the pipeline is predictable and composable, and accidental data loss from a misconfigured re-ingest is not possible.
+
+**Why label-specific Cypher for Neo4j deletion instead of SDN repositories?**
+SDN repositories load every entity into memory before deleting (N+1 queries). For a 600-file service this causes `ConnectionReadTimeoutException` after 2+ minutes. `GraphDeleter` runs `MATCH (n:Label {serviceName: $s}) WITH n LIMIT 500 DETACH DELETE n` directly via `Neo4jClient` — server-side deletion, no entity materialisation, milliseconds per batch. Label-specific queries are required because Neo4j indexes are label-scoped; a label-free `MATCH` forces a full graph scan.
 
 **Why flat Cypher for CFG persistence?**
 Spring Data Neo4j serializes entity graphs recursively, causing `StackOverflowError` on large CFG subgraphs. `CfgSaver` uses `Neo4jClient` directly with a two-pass Cypher strategy to avoid this.

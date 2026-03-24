@@ -9,68 +9,140 @@ http://localhost:8080
 
 ## Ingestion Endpoints
 
-### Full Ingestion
+### Ingest (Smart — auto-selects strategy)
 ```
 POST /api/ingest
 ```
 
-Ingests an entire service from scratch. Purges all existing data for the service name before re-ingesting.
+Ingests a service using the strategy automatically selected by `IngestionStrategyResolver`:
+
+| Condition | Strategy | What happens |
+|---|---|---|
+| Service not yet registered | `FRESH` | Full pipeline runs; service registered on completion |
+| Service registered, `force` omitted or `false` | `INCREMENTAL` | Only changed files processed (~32× faster) |
+| Service registered, `force=true` | `FORCE_FULL` | Data purged first, then full pipeline runs |
 
 **Request body:**
 ```json
 {
   "repoPath": "/absolute/path/to/your/java/service",
-  "serviceName": "my-service"
+  "serviceName": "my-service",
+  "force": "false"
 }
 ```
 
-**Response:**
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `repoPath` | yes | — | Absolute path to the service's root directory |
+| `serviceName` | yes | — | Logical name used as the isolation key across all stores |
+| `force` | no | `"false"` | Set `"true"` to force a full re-ingest even if the service is already registered |
+
+**Response — FRESH or FORCE_FULL:**
 ```json
 {
   "serviceName": "my-service",
-  "classCount": 42,
-  "methodCount": 318,
-  "endpointCount": 24,
-  "chunkCount": 512,
-  "docChunkCount": 89,
-  "status": "SUCCESS"
+  "totalCodeChunks": 512,
+  "totalDocChunks": 89,
+  "totalClasses": 42,
+  "totalMethods": 318,
+  "cfgNodes": 1204,
+  "languageBreakdown": {
+    "JAVA": 480,
+    "CONFIG": 18,
+    "DOCUMENTATION": 14
+  }
 }
 ```
 
-**When to use:** First-time ingestion or when you want a clean re-index of the entire service.
-
----
-
-### Incremental Ingestion
-```
-POST /api/ingest/incremental
-```
-
-Ingests only files that were added, modified, or deleted since the last ingestion. ~32× faster than full ingestion for small changesets.
-
-**Request body:**
-```json
-{
-  "repoPath": "/absolute/path/to/your/java/service",
-  "serviceName": "my-service"
-}
-```
-
-**Response:**
+**Response — INCREMENTAL:**
 ```json
 {
   "serviceName": "my-service",
   "added": 2,
   "modified": 1,
   "deleted": 0,
-  "skipped": 487,
-  "status": "SUCCESS"
+  "unchanged": 487
 }
 ```
 
-**When to use:** After making code changes locally; wire this into a file-watcher for real-time indexing.
+---
+
+## Service Management Endpoints
+
+### List All Services
+```
+GET /api/services
+```
+
+Returns all services currently in the service registry.
+
+**Response:**
+```json
+[
+  {
+    "serviceName": "payment-service",
+    "repoPath": "/home/dev/payment-service",
+    "status": "ACTIVE",
+    "ingestedAt": "2026-01-10T08:30:00Z",
+    "lastUpdatedAt": "2026-03-20T14:15:00Z",
+    "fileCount": 143
+  },
+  {
+    "serviceName": "order-service",
+    "repoPath": "/home/dev/order-service",
+    "status": "ACTIVE",
+    "ingestedAt": "2026-01-12T09:00:00Z",
+    "lastUpdatedAt": "2026-03-21T10:00:00Z",
+    "fileCount": 87
+  }
+]
+```
 
 ---
+
+### Get Single Service
+```
+GET /api/services/{serviceName}
+```
+
+Returns the registry entry for a single service.
+
+**Response — 200:**
+```json
+{
+  "serviceName": "payment-service",
+  "repoPath": "/home/dev/payment-service",
+  "status": "ACTIVE",
+  "ingestedAt": "2026-01-10T08:30:00Z",
+  "lastUpdatedAt": "2026-03-20T14:15:00Z",
+  "fileCount": 143
+}
+```
+
+**Response — 404:** Service not registered.
+
+---
+
+### Delete Service
+```
+DELETE /api/services/{serviceName}
+```
+
+Removes a service completely: deletes all Neo4j nodes, pgvector embeddings, file fingerprints, and the registry entry.
+
+**Response — 200:**
+```json
+{
+  "serviceName": "payment-service",
+  "message": "Service deleted successfully"
+}
+```
+
+**Response — 404:** Service not found in the registry; nothing deleted.
+
+---
+
+## Query Endpoints
 
 ### Semantic Search (raw)
 ```
@@ -109,14 +181,12 @@ Returns raw vector search results without graph expansion or LLM synthesis. Usef
 
 ---
 
-## Query Endpoints
-
 ### Intent-Based Retrieval (no LLM)
 ```
 POST /api/query
 ```
 
-Classifies the query, performs intent-based retrieval from Neo4j + pgvector, and returns structured results — without calling the LLM for synthesis.
+Classifies the query, performs intent-based retrieval from Neo4j + pgvector, and returns structured results without calling the LLM for synthesis.
 
 **Request body:**
 ```json
@@ -199,7 +269,21 @@ Full pipeline: intent classification → retrieval → context assembly → Groq
 
 ---
 
-## Response DTOs
+## Service Registry DTOs
+
+### `ServiceRecord`
+| Field | Type | Description |
+|---|---|---|
+| `serviceName` | String | Logical service name (isolation key) |
+| `repoPath` | String | Absolute path to the service repo |
+| `status` | String | `INGESTING`, `ACTIVE`, `DELETING`, `ERROR` |
+| `ingestedAt` | Instant | Timestamp of first successful ingestion |
+| `lastUpdatedAt` | Instant | Timestamp of most recent ingestion or update |
+| `fileCount` | int | Number of files processed during last ingestion |
+
+---
+
+## Response DTOs (Retrieval)
 
 ### `ChunkView`
 | Field | Type |
@@ -231,12 +315,10 @@ Full pipeline: intent classification → retrieval → context assembly → Groq
 
 ## Error Responses
 
-All endpoints return standard Spring Boot error responses for 4xx/5xx conditions.
-
 | HTTP Status | Meaning |
 |---|---|
 | `400 Bad Request` | Missing required fields in request body |
-| `404 Not Found` | Service name not found (for query endpoints) |
+| `404 Not Found` | Service name not found (for service management and query endpoints) |
 | `500 Internal Server Error` | Ingestion or LLM call failure |
 
 For `/api/ask`, if the LLM call fails the response will still be `200 OK` but `synthesized` will be `false` and `answer` will contain a graceful error message.

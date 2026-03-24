@@ -13,7 +13,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,18 +25,20 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link IngestionPipeline}.
  *
- * <p>Verifies that the pipeline purges existing service data before
- * re-ingesting, preventing duplicate chunks and graph nodes.</p>
+ * <p>The pipeline is a pure <em>write</em> operation — it walks the repository,
+ * processes files, and persists results. It no longer purges existing data;
+ * purging is the responsibility of {@link ServiceDeletionService}.
+ * These tests verify that data is correctly written and that file hashes are
+ * saved after ingestion.</p>
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("IngestionPipeline — unit")
 class IngestionPipelineTest {
 
-    @Mock private VectorStore vectorStore;
-    @Mock private KnowledgeGraphService graphService;
-    @Mock private JavaFileProcessor javaProcessor;
-    @Mock private JdbcTemplate jdbcTemplate;
-    @Mock private FileFingerprinter fingerprinter;
+    @Mock private VectorStore            vectorStore;
+    @Mock private KnowledgeGraphService  graphService;
+    @Mock private JavaFileProcessor      javaProcessor;
+    @Mock private FileFingerprinter      fingerprinter;
 
     @TempDir
     Path repoDir;
@@ -46,83 +47,29 @@ class IngestionPipelineTest {
 
     @BeforeEach
     void setUp() {
-        // JavaFileProcessor is also a FileProcessor — pass it in both roles
         pipeline = new IngestionPipeline(
                 List.of(javaProcessor),
                 vectorStore,
                 graphService,
                 javaProcessor,
-                jdbcTemplate,
                 fingerprinter);
     }
 
-    // ── Purge behaviour ───────────────────────────────────────────────────────
+    // ── No purge in pipeline ───────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("Purge before ingest")
-    class PurgeBehaviour {
+    @DisplayName("Pipeline does not purge — purge is ServiceDeletionService's job")
+    class NoPurgeBehaviour {
 
         @Test
-        @DisplayName("Deletes existing graph nodes for the service before ingesting")
-        void deletesGraphNodesForServiceBeforeIngest() throws IOException {
+        @DisplayName("Does NOT call deleteServiceGraph — pipeline is additive only")
+        void doesNotDeleteGraph() throws IOException {
             Files.writeString(repoDir.resolve("Dummy.txt"), "hello");
             stubJavaProcessorForEmptyRepo();
 
             pipeline.ingest(repoDir, "my-svc");
 
-            verify(graphService).deleteServiceGraph("my-svc");
-        }
-
-        @Test
-        @DisplayName("Deletes existing pgvector rows for the service before ingesting")
-        void deletesVectorRowsForServiceBeforeIngest() throws IOException {
-            Files.writeString(repoDir.resolve("Dummy.txt"), "hello");
-            stubJavaProcessorForEmptyRepo();
-
-            pipeline.ingest(repoDir, "my-svc");
-
-            verify(jdbcTemplate).update(
-                    "DELETE FROM vector_store WHERE metadata->>'service_name' = ?",
-                    "my-svc");
-        }
-
-        @Test
-        @DisplayName("Purges BEFORE writing new data — graph delete precedes saveFileResult")
-        void purgeHappensBeforeSave() throws IOException {
-            Files.writeString(repoDir.resolve("Dummy.txt"), "hello");
-            stubJavaProcessorForEmptyRepo();
-
-            var order = inOrder(graphService);
-
-            pipeline.ingest(repoDir, "order-svc");
-
-            order.verify(graphService).deleteServiceGraph("order-svc");
-            order.verify(graphService).saveFileResult(any());
-        }
-
-        @Test
-        @DisplayName("Purges BEFORE embedding new vectors — jdbc delete precedes vectorStore.add")
-        void purgeHappensBeforeVectorAdd() throws IOException {
-            stubJavaProcessorForEmptyRepo();
-
-            var order = inOrder(jdbcTemplate, vectorStore);
-
-            pipeline.ingest(repoDir, "order-svc");
-
-            order.verify(jdbcTemplate).update(anyString(), eq("order-svc"));
-            // vectorStore.add is only called if there are chunks; with empty repo it is skipped
-            // This ordering test is sufficient: jdbc delete must precede any add
-        }
-
-        @Test
-        @DisplayName("Purges with the exact serviceName from the request")
-        void purgesWithCorrectServiceName() throws IOException {
-            stubJavaProcessorForEmptyRepo();
-
-            pipeline.ingest(repoDir, "exact-svc-name");
-
-            verify(graphService).deleteServiceGraph("exact-svc-name");
-            verify(jdbcTemplate).update(anyString(), eq("exact-svc-name"));
+            verify(graphService, never()).deleteServiceGraph(anyString());
         }
     }
 
