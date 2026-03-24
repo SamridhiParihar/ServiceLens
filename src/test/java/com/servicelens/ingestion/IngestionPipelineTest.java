@@ -3,6 +3,7 @@ package com.servicelens.ingestion;
 import com.servicelens.chunking.FileProcessor;
 import com.servicelens.chunking.processors.JavaFileProcessor;
 import com.servicelens.graph.KnowledgeGraphService;
+import com.servicelens.incremental.FileFingerprinter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -36,6 +37,7 @@ class IngestionPipelineTest {
     @Mock private KnowledgeGraphService graphService;
     @Mock private JavaFileProcessor javaProcessor;
     @Mock private JdbcTemplate jdbcTemplate;
+    @Mock private FileFingerprinter fingerprinter;
 
     @TempDir
     Path repoDir;
@@ -50,7 +52,8 @@ class IngestionPipelineTest {
                 vectorStore,
                 graphService,
                 javaProcessor,
-                jdbcTemplate);
+                jdbcTemplate,
+                fingerprinter);
     }
 
     // ── Purge behaviour ───────────────────────────────────────────────────────
@@ -120,6 +123,46 @@ class IngestionPipelineTest {
 
             verify(graphService).deleteServiceGraph("exact-svc-name");
             verify(jdbcTemplate).update(anyString(), eq("exact-svc-name"));
+        }
+    }
+
+    // ── Hash persistence ──────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Hash persistence after full ingest")
+    class HashPersistence {
+
+        @Test
+        @DisplayName("Saves file hashes after ingestion so incremental runs have a baseline")
+        void savesHashesAfterIngestion() throws IOException {
+            stubJavaProcessorForEmptyRepo();
+
+            pipeline.ingest(repoDir, "my-svc");
+
+            verify(fingerprinter).saveHashes(eq("my-svc"), any());
+        }
+
+        @Test
+        @DisplayName("saveHashes is called even when the repo has no supported files")
+        void savesHashesForEmptyRepo() throws IOException {
+            stubJavaProcessorForEmptyRepo();
+
+            pipeline.ingest(repoDir, "empty-svc");
+
+            verify(fingerprinter).saveHashes(eq("empty-svc"), any());
+        }
+
+        @Test
+        @DisplayName("saveHashes is called after graph and vector data are written")
+        void hashSavedAfterData() throws IOException {
+            stubJavaProcessorForEmptyRepo();
+
+            var order = inOrder(graphService, fingerprinter);
+
+            pipeline.ingest(repoDir, "order-svc");
+
+            order.verify(graphService).saveFileResult(any());
+            order.verify(fingerprinter).saveHashes(eq("order-svc"), any());
         }
     }
 

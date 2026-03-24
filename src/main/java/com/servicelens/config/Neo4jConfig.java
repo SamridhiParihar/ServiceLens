@@ -153,6 +153,10 @@ public class Neo4jConfig {
                     "CREATE INDEX cfg_method IF NOT EXISTS " +
                             "FOR (n:CfgNode) ON (n.methodQualifiedName)");
 
+            runCypher(neo4jClient,
+                    "CREATE INDEX cfg_service IF NOT EXISTS " +
+                            "FOR (n:CfgNode) ON (n.serviceName)");
+
             log.info("Neo4j schema initialised successfully");
         };
     }

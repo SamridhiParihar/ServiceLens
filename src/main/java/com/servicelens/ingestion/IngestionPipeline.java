@@ -5,6 +5,7 @@ import com.servicelens.chunking.CodeChunk;
 import com.servicelens.chunking.FileProcessor;
 import com.servicelens.chunking.processors.JavaFileProcessor;
 import com.servicelens.graph.KnowledgeGraphService;
+import com.servicelens.incremental.FileFingerprinter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.util.HashMap;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -33,12 +35,14 @@ public class IngestionPipeline {
     private final KnowledgeGraphService graphService;
     private final JavaFileProcessor javaProcessor;
     private final JdbcTemplate jdbcTemplate;
+    private final FileFingerprinter fingerprinter;
 
     public IngestionPipeline(List<FileProcessor> processors,
                              VectorStore vectorStore,
                              KnowledgeGraphService graphService,
                              JavaFileProcessor javaProcessor,
-                             JdbcTemplate jdbcTemplate) {
+                             JdbcTemplate jdbcTemplate,
+                             FileFingerprinter fingerprinter) {
         this.processors   = processors.stream()
                 .sorted(Comparator.comparingInt(FileProcessor::priority).reversed())
                 .collect(Collectors.toList());
@@ -46,6 +50,7 @@ public class IngestionPipeline {
         this.graphService  = graphService;
         this.javaProcessor = javaProcessor;
         this.jdbcTemplate  = jdbcTemplate;
+        this.fingerprinter = fingerprinter;
     }
 
     public IngestionResult ingest(Path repoRoot, String serviceName) {
@@ -55,6 +60,7 @@ public class IngestionPipeline {
         List<CodeChunk> allChunks         = new ArrayList<>();
         List<Document> allDocChunks       = new ArrayList<>(); // Javadoc docs
         List<CfgNode> allCfgNodes         = new ArrayList<>();
+        Map<String, String> currentHashes = new HashMap<>();
 
         // For graph
         var allClassNodes  = new ArrayList<com.servicelens.graph.domain.ClassNode>();
@@ -88,13 +94,18 @@ public class IngestionPipeline {
                                 result.chunks().size(), result.documentationChunks().size(),
                                 result.classNodes().size(), result.methodNodes().size(),
                                 result.cfgNodes().size());
+
+                        recordHash(file, currentHashes);
                     } else {
                         processors.stream()
                                 .filter(p -> !(p instanceof JavaFileProcessor))
                                 .filter(p -> p.supports(file))
                                 .findFirst()
                                 .ifPresent(p -> {
-                                    try { allChunks.addAll(p.process(file, serviceName)); }
+                                    try {
+                                        allChunks.addAll(p.process(file, serviceName));
+                                        recordHash(file, currentHashes);
+                                    }
                                     catch (Exception e) {
                                         log.warn("Failed: {} — {}", file.getFileName(), e.getMessage());
                                     }
@@ -125,7 +136,8 @@ public class IngestionPipeline {
         log.info("Embedding {} documentation chunks into pgvector", allDocChunks.size());
         storeInBatches(allDocChunks, "documentation");
 
-        log.info("═══ Ingestion complete for: {} ═══", serviceName);
+        fingerprinter.saveHashes(serviceName, currentHashes);
+        log.info("═══ Ingestion complete for: {} — {} file hashes saved ═══", serviceName, currentHashes.size());
 
         return new IngestionResult(
                 serviceName,
@@ -136,6 +148,14 @@ public class IngestionPipeline {
                 allCfgNodes.size(),
                 countByType(allChunks)
         );
+    }
+
+    private void recordHash(Path file, Map<String, String> hashes) {
+        try {
+            hashes.put(file.toAbsolutePath().toString(), fingerprinter.computeHash(file));
+        } catch (IOException e) {
+            log.warn("Could not hash file {}: {}", file.getFileName(), e.getMessage());
+        }
     }
 
     /**

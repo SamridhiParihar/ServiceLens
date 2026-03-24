@@ -9,7 +9,6 @@ import com.servicelens.graph.repository.ClassNodeRepository;
 import com.servicelens.graph.repository.MethodNodeRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,19 +44,19 @@ public class KnowledgeGraphService {
     private final MethodNodeRepository methodRepo;
     private final CfgNodeRepository cfgRepo;
     private final CfgSaver cfgSaver;
-    private final Neo4jClient neo4jClient;
+    private final GraphDeleter graphDeleter;
 
     public KnowledgeGraphService(
             ClassNodeRepository classRepo,
             MethodNodeRepository methodRepo,
             CfgNodeRepository cfgRepo,
             CfgSaver cfgSaver,
-            Neo4jClient neo4jClient) {
-        this.classRepo   = classRepo;
-        this.methodRepo  = methodRepo;
-        this.cfgRepo     = cfgRepo;
-        this.cfgSaver    = cfgSaver;
-        this.neo4jClient = neo4jClient;
+            GraphDeleter graphDeleter) {
+        this.classRepo    = classRepo;
+        this.methodRepo   = methodRepo;
+        this.cfgRepo      = cfgRepo;
+        this.cfgSaver     = cfgSaver;
+        this.graphDeleter = graphDeleter;
     }
 
     /**
@@ -108,17 +107,18 @@ public class KnowledgeGraphService {
      *
      * @param serviceName the logical name of the service whose graph should be wiped
      */
-    @Transactional
     public void deleteServiceGraph(String serviceName) {
         log.info("Deleting graph for service: {}", serviceName);
 
-        cfgRepo.deleteByServiceName(serviceName);
+        long deleted;
+        int batches = 0;
+        do {
+            deleted = graphDeleter.deleteBatch(serviceName);
+            batches++;
+            log.debug("Delete batch {}: removed {} nodes", batches, deleted);
+        } while (deleted > 0);
 
-        methodRepo.findByServiceName(serviceName).forEach(methodRepo::delete);
-
-        classRepo.findByServiceName(serviceName).forEach(classRepo::delete);
-
-        log.info("Graph deleted for service: {}", serviceName);
+        log.info("Graph deleted for service: {} in {} batches", serviceName, batches - 1);
     }
 
     /**
@@ -130,11 +130,8 @@ public class KnowledgeGraphService {
      *
      * @param filePath the absolute file path whose nodes should be removed
      */
-    @Transactional
     public void deleteByFilePath(String filePath) {
-        neo4jClient.query(
-                "MATCH (n) WHERE n.filePath = $filePath DETACH DELETE n"
-        ).bind(filePath).to("filePath").run();
+        graphDeleter.deleteByFilePath(filePath);
         log.debug("Deleted graph nodes for file: {}", filePath);
     }
 

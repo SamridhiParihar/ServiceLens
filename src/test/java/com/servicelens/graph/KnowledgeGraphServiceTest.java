@@ -16,8 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.neo4j.core.Neo4jClient;
-
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,16 +26,16 @@ import static org.mockito.Mockito.*;
  * Unit tests for {@link KnowledgeGraphService}.
  *
  * <p>{@code KnowledgeGraphService} is a facade over three Spring Data Neo4j
- * repositories and a {@link Neo4jClient}.  All four collaborators are replaced
- * by Mockito mocks so that tests run without a live Neo4j instance.</p>
+ * repositories, a {@link CfgSaver}, and a {@link GraphDeleter}.  All collaborators
+ * are replaced by Mockito mocks so that tests run without a live Neo4j instance.</p>
  *
  * <p>Test categories:</p>
  * <ul>
  *   <li><strong>saveFileResult</strong> — verifies that class nodes, method nodes, and
  *       CFG nodes from a {@link JavaFileProcessor.JavaFileResult} are each persisted
  *       to the correct repository.</li>
- *   <li><strong>deleteServiceGraph</strong> — verifies deletion order (CFG → methods →
- *       classes) and correct repository calls.</li>
+ *   <li><strong>deleteServiceGraph</strong> — verifies that {@link GraphDeleter#deleteBatch}
+ *       is called in a loop until it returns zero.</li>
  *   <li><strong>Read delegation</strong> — verifies that every read method on the service
  *       delegates to the appropriate repository method with the same arguments.</li>
  *   <li><strong>getServiceStats</strong> — verifies that the stats map contains the
@@ -63,7 +61,7 @@ class KnowledgeGraphServiceTest {
     private CfgSaver cfgSaver;
 
     @Mock
-    private Neo4jClient neo4jClient;
+    private GraphDeleter graphDeleter;
 
     /** The component under test. */
     private KnowledgeGraphService graphService;
@@ -72,7 +70,7 @@ class KnowledgeGraphServiceTest {
 
     @BeforeEach
     void setUp() {
-        graphService = new KnowledgeGraphService(classRepo, methodRepo, cfgRepo, cfgSaver, neo4jClient);
+        graphService = new KnowledgeGraphService(classRepo, methodRepo, cfgRepo, cfgSaver, graphDeleter);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -157,42 +155,34 @@ class KnowledgeGraphServiceTest {
     class DeleteServiceGraphTests {
 
         @Test
-        @DisplayName("Deletes CFG nodes by service name")
-        void deletesCfgNodesByServiceName() {
-            when(methodRepo.findByServiceName(SERVICE)).thenReturn(List.of());
-            when(classRepo.findByServiceName(SERVICE)).thenReturn(List.of());
+        @DisplayName("Calls deleteBatch until it returns zero")
+        void callsDeleteBatchUntilExhausted() {
+            // first call deletes 3 nodes, second call finds nothing left
+            when(graphDeleter.deleteBatch(SERVICE)).thenReturn(3L, 0L);
 
             graphService.deleteServiceGraph(SERVICE);
 
-            verify(cfgRepo).deleteByServiceName(SERVICE);
+            verify(graphDeleter, times(2)).deleteBatch(SERVICE);
         }
 
         @Test
-        @DisplayName("Deletes all method nodes returned by service name lookup")
-        void deletesAllMethodNodes() {
-            MethodNode m1 = methodNode("m1");
-            MethodNode m2 = methodNode("m2");
-            when(methodRepo.findByServiceName(SERVICE)).thenReturn(List.of(m1, m2));
-            when(classRepo.findByServiceName(SERVICE)).thenReturn(List.of());
+        @DisplayName("Stops after single batch when graph is already empty")
+        void stopsImmediatelyWhenAlreadyEmpty() {
+            when(graphDeleter.deleteBatch(SERVICE)).thenReturn(0L);
 
             graphService.deleteServiceGraph(SERVICE);
 
-            verify(methodRepo).delete(m1);
-            verify(methodRepo).delete(m2);
+            verify(graphDeleter, times(1)).deleteBatch(SERVICE);
         }
 
         @Test
-        @DisplayName("Deletes all class nodes returned by service name lookup")
-        void deletesAllClassNodes() {
-            ClassNode c1 = classNode("OrderService");
-            ClassNode c2 = classNode("PaymentService");
-            when(methodRepo.findByServiceName(SERVICE)).thenReturn(List.of());
-            when(classRepo.findByServiceName(SERVICE)).thenReturn(List.of(c1, c2));
+        @DisplayName("Loops for multiple batches until fully deleted")
+        void loopsForMultipleBatches() {
+            when(graphDeleter.deleteBatch(SERVICE)).thenReturn(500L, 500L, 200L, 0L);
 
             graphService.deleteServiceGraph(SERVICE);
 
-            verify(classRepo).delete(c1);
-            verify(classRepo).delete(c2);
+            verify(graphDeleter, times(4)).deleteBatch(SERVICE);
         }
     }
 
