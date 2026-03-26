@@ -192,9 +192,16 @@ Classifies the query, performs intent-based retrieval from Neo4j + pgvector, and
 ```json
 {
   "query": "Who calls processPayment?",
-  "serviceName": "my-service"
+  "serviceName": "my-service",
+  "sessionId": null
 }
 ```
+
+| Field | Required | Description |
+|---|---|---|
+| `query` | yes | The natural-language question |
+| `serviceName` | yes | The service to query (must be ingested) |
+| `sessionId` | no | Session UUID from a prior `/api/ask` response — not used by `/api/query` (retrieval only), but accepted for forward compatibility |
 
 **Response:**
 ```json
@@ -239,9 +246,16 @@ Full pipeline: intent classification → retrieval → context assembly → Groq
 ```json
 {
   "query": "Walk me through the call chain from submitOrder to the database",
-  "serviceName": "my-service"
+  "serviceName": "my-service",
+  "sessionId": "a3f9c2d1-..."
 }
 ```
+
+| Field | Required | Description |
+|---|---|---|
+| `query` | yes | The natural-language question |
+| `serviceName` | yes | The service to query (must be ingested) |
+| `sessionId` | no | UUID returned by a prior `/api/ask` response. When present the backend resumes the session and injects the last 2 conversation turns as context for the LLM. Omit or pass `null` to start a fresh session. |
 
 **Response:**
 ```json
@@ -252,6 +266,7 @@ Full pipeline: intent classification → retrieval → context assembly → Groq
   "intentConfidence": 0.9,
   "modelUsed": "llama-3.3-70b-versatile",
   "contextChunksUsed": 14,
+  "sessionId": "a3f9c2d1-4b8e-4f1a-9c3d-2e5f6a7b8c9d",
   "retrieval": {
     "intent": "TRACE_CALL_CHAIN",
     "intentConfidence": 0.9,
@@ -265,7 +280,42 @@ Full pipeline: intent classification → retrieval → context assembly → Groq
 }
 ```
 
+> **Session management:** The `sessionId` in the response must be persisted by the client (localStorage recommended) and sent back on the next request. The backend silently creates a new session if the provided ID is expired (>30 min inactive) or not found.
+
 **When to use:** Primary endpoint for all end-user queries.
+
+---
+
+### Session History
+```
+GET /api/sessions/{sessionId}/history
+```
+
+Returns the stored conversation turns for a session. Useful for debugging or displaying prior context.
+
+**Response:**
+```json
+[
+  {
+    "query": "Who calls processPayment?",
+    "intent": "TRACE_CALLERS",
+    "answerSummary": "processPayment is called by OrderService.submitOrder and CheckoutService.checkout..."
+  },
+  {
+    "query": "Why does it fail?",
+    "intent": "DEBUG_ERROR",
+    "answerSummary": "The root cause is a null Order passed to processPayment when the cart is empty..."
+  }
+]
+```
+
+| Field | Description |
+|---|---|
+| `query` | The original user question for that turn |
+| `intent` | Detected intent name |
+| `answerSummary` | First 150 characters of the synthesized answer |
+
+Returns an empty array `[]` if the session has no history. Returns `400` for an invalid UUID format.
 
 ---
 

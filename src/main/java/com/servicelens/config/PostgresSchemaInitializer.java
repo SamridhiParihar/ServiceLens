@@ -17,6 +17,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <ul>
  *   <li>{@code service_registry} — tracks every service ingested into ServiceLens,
  *       its lifecycle status, repo path, ingestion timestamps, and file count.</li>
+ *   <li>{@code conversation_sessions} — stores per-session conversation history
+ *       (last 5 turns) so follow-up queries have context from prior exchanges.</li>
  * </ul>
  *
  * <p>The {@code vector_store} table is created by Spring AI's pgvector auto-configuration
@@ -47,7 +49,18 @@ public class PostgresSchemaInitializer {
                         file_count      INT                      DEFAULT 0
                     )
                     """);
-            log.info("PostgreSQL schema initialised (service_registry ready)");
+
+            jdbc.execute("""
+                    CREATE TABLE IF NOT EXISTS conversation_sessions (
+                        session_id      UUID                     PRIMARY KEY,
+                        service_name    VARCHAR(255)             NOT NULL,
+                        history         JSONB                    NOT NULL DEFAULT '[]',
+                        created_at      TIMESTAMP WITH TIME ZONE NOT NULL,
+                        last_active_at  TIMESTAMP WITH TIME ZONE NOT NULL
+                    )
+                    """);
+
+            log.info("PostgreSQL schema initialised (service_registry, conversation_sessions ready)");
         };
     }
 }

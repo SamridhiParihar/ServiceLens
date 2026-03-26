@@ -5,6 +5,9 @@ import com.servicelens.graph.domain.ClassNode;
 import com.servicelens.graph.domain.MethodNode;
 import com.servicelens.retrieval.intent.IntentBasedRetriever;
 import com.servicelens.retrieval.intent.RetrievalResult;
+import com.servicelens.session.ConversationSession;
+import com.servicelens.session.ConversationSessionService;
+import com.servicelens.session.ConversationTurn;
 import com.servicelens.synthesis.AnswerSynthesizer;
 import com.servicelens.synthesis.SynthesisResult;
 import org.slf4j.Logger;
@@ -17,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * REST controller that exposes the full intent-based retrieval pipeline over HTTP.
@@ -65,12 +69,16 @@ public class QueryController {
 
     private static final Logger log = LoggerFactory.getLogger(QueryController.class);
 
-    private final IntentBasedRetriever retriever;
-    private final AnswerSynthesizer    synthesizer;
+    private final IntentBasedRetriever      retriever;
+    private final AnswerSynthesizer         synthesizer;
+    private final ConversationSessionService sessionService;
 
-    public QueryController(IntentBasedRetriever retriever, AnswerSynthesizer synthesizer) {
-        this.retriever   = retriever;
-        this.synthesizer = synthesizer;
+    public QueryController(IntentBasedRetriever retriever,
+                           AnswerSynthesizer synthesizer,
+                           ConversationSessionService sessionService) {
+        this.retriever      = retriever;
+        this.synthesizer    = synthesizer;
+        this.sessionService = sessionService;
     }
 
     /**
@@ -109,11 +117,47 @@ public class QueryController {
         validate(request);
         log.debug("Ask request: service='{}' query='{}'", request.serviceName(), request.query());
 
-        RetrievalResult retrieval = retriever.retrieve(request.query(), request.serviceName());
-        SynthesisResult synthesis = synthesizer.synthesize(request.query(), retrieval);
+        // ── Session resolution ────────────────────────────────────────────────
+        ConversationSession session = sessionService.getOrCreate(
+                request.sessionId(), request.serviceName());
 
-        log.debug("Ask complete: synthesized={} intent={}", synthesis.synthesized(), synthesis.intent());
-        return ResponseEntity.ok(AskResponse.from(synthesis, retrieval));
+        // Last 2 turns injected as conversation history
+        List<ConversationTurn> history = session.history().size() > 2
+                ? session.history().subList(session.history().size() - 2, session.history().size())
+                : session.history();
+
+        // ── Retrieval + synthesis ─────────────────────────────────────────────
+        RetrievalResult retrieval = retriever.retrieve(request.query(), request.serviceName());
+        SynthesisResult synthesis = synthesizer.synthesize(request.query(), retrieval, history);
+
+        // ── Persist the completed turn ────────────────────────────────────────
+        sessionService.addTurn(
+                session.sessionId(),
+                request.query(),
+                synthesis.intent().name(),
+                synthesis.answer());
+
+        log.debug("Ask complete: synthesized={} intent={} sessionId={}",
+                synthesis.synthesized(), synthesis.intent(), session.sessionId());
+
+        return ResponseEntity.ok(AskResponse.from(synthesis, retrieval, session.sessionId()));
+    }
+
+    /**
+     * Retrieve the conversation history for a session.
+     *
+     * @param sessionId the session UUID
+     * @return list of prior turns, or 404 if the session does not exist
+     */
+    @GetMapping("/sessions/{sessionId}/history")
+    public ResponseEntity<List<ConversationTurn>> sessionHistory(@PathVariable String sessionId) {
+        try {
+            UUID id = UUID.fromString(sessionId);
+            List<ConversationTurn> history = sessionService.getHistory(id);
+            return ResponseEntity.ok(history);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid sessionId format");
+        }
     }
 
     // ── Validation ────────────────────────────────────────────────────────────
@@ -130,12 +174,16 @@ public class QueryController {
     // ── Request / Response DTOs ───────────────────────────────────────────────
 
     /**
-     * JSON request body for {@code POST /api/query}.
+     * JSON request body for {@code POST /api/query} and {@code POST /api/ask}.
      *
      * @param query       the natural-language question
      * @param serviceName the logical service to search (must have been ingested first)
+     * @param sessionId   optional UUID from a prior {@code /api/ask} response;
+     *                    when provided the backend resumes the existing session and
+     *                    injects prior conversation turns as context.  Omit or pass
+     *                    {@code null} to start a fresh session.
      */
-    public record QueryRequest(String query, String serviceName) {}
+    public record QueryRequest(String query, String serviceName, String sessionId) {}
 
     /**
      * Structured response from the intent-based retrieval pipeline.
@@ -238,6 +286,19 @@ public class QueryController {
      * @param contextChunksUsed number of retrieved items sent to the LLM
      * @param retrieval         the underlying retrieval result for citation / debugging
      */
+    /**
+     * Response from {@code POST /api/ask} — synthesized answer plus full retrieval context.
+     *
+     * @param answer            LLM-generated natural-language answer
+     * @param synthesized       {@code true} if the answer was generated from real context
+     * @param intent            detected intent name
+     * @param intentConfidence  classifier confidence in {@code [0.0, 1.0]}
+     * @param modelUsed         model name that produced the answer
+     * @param contextChunksUsed number of retrieved items sent to the LLM
+     * @param retrieval         the underlying retrieval result for citation / debugging
+     * @param sessionId         the active session UUID — client should persist this and
+     *                          send it back on the next request to maintain conversation context
+     */
     public record AskResponse(
             String        answer,
             boolean       synthesized,
@@ -245,9 +306,10 @@ public class QueryController {
             float         intentConfidence,
             String        modelUsed,
             int           contextChunksUsed,
-            QueryResponse retrieval
+            QueryResponse retrieval,
+            String        sessionId
     ) {
-        static AskResponse from(SynthesisResult synthesis, RetrievalResult retrieval) {
+        static AskResponse from(SynthesisResult synthesis, RetrievalResult retrieval, UUID sessionId) {
             return new AskResponse(
                     synthesis.answer(),
                     synthesis.synthesized(),
@@ -255,7 +317,8 @@ public class QueryController {
                     synthesis.intentConfidence(),
                     synthesis.modelUsed(),
                     synthesis.contextChunksUsed(),
-                    QueryResponse.from(retrieval)
+                    QueryResponse.from(retrieval),
+                    sessionId.toString()
             );
         }
     }

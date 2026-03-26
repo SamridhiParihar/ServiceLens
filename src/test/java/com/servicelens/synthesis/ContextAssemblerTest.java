@@ -5,6 +5,7 @@ import com.servicelens.graph.domain.MethodNode;
 import com.servicelens.graph.domain.NodeType;
 import com.servicelens.retrieval.intent.QueryIntent;
 import com.servicelens.retrieval.intent.RetrievalResult;
+import com.servicelens.session.ConversationTurn;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -187,6 +188,77 @@ class ContextAssemblerTest {
         assertThat(context).contains("GET");
         assertThat(context).contains("/orders/{id}");
         assertThat(context).contains("OrderController.getOrder");
+    }
+
+    // ── Conversation history injection ────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Conversation history injection")
+    class ConversationHistoryTests {
+
+        @Test
+        @DisplayName("assembleWithHistory prepends history section before code context")
+        void historyPrependedBeforeCodeContext() {
+            ConversationTurn turn = new ConversationTurn(
+                    "what calls processPayment?", "TRACE_CALLERS", "It is called by CheckoutService.");
+            Document doc = new Document("void processPayment() {}",
+                    Map.of("chunk_type", "CODE", "element_name", "processPayment",
+                           "class_name", "PaymentService", "service_name", "svc"));
+
+            RetrievalResult result = RetrievalResult.semantic(
+                    QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of(doc));
+
+            String context = assembler.assembleWithHistory(result, List.of(turn));
+
+            assertThat(context).contains("CONVERSATION HISTORY");
+            assertThat(context).contains("Q: what calls processPayment?");
+            assertThat(context).contains("A: It is called by CheckoutService.");
+            assertThat(context).contains("RELEVANT CODE CHUNKS");
+            // History must appear BEFORE code context
+            assertThat(context.indexOf("CONVERSATION HISTORY"))
+                    .isLessThan(context.indexOf("RELEVANT CODE CHUNKS"));
+        }
+
+        @Test
+        @DisplayName("assembleWithHistory with empty history is identical to assemble()")
+        void emptyHistory_identicalToAssemble() {
+            Document doc = new Document("void foo() {}",
+                    Map.of("chunk_type", "CODE", "element_name", "foo", "class_name", "Bar"));
+            RetrievalResult result = RetrievalResult.semantic(
+                    QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of(doc));
+
+            assertThat(assembler.assembleWithHistory(result, List.of()))
+                    .isEqualTo(assembler.assemble(result));
+        }
+
+        @Test
+        @DisplayName("Multiple history turns all appear in context")
+        void multipleTurns_allAppearInContext() {
+            List<ConversationTurn> turns = List.of(
+                    new ConversationTurn("q1", "FIND_IMPLEMENTATION", "a1"),
+                    new ConversationTurn("q2", "TRACE_CALLERS", "a2")
+            );
+            RetrievalResult result = RetrievalResult.semantic(
+                    QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of());
+
+            String context = assembler.assembleWithHistory(result, turns);
+
+            assertThat(context).contains("Q: q1").contains("A: a1");
+            assertThat(context).contains("Q: q2").contains("A: a2");
+        }
+
+        @Test
+        @DisplayName("assemble() delegates to assembleWithHistory — no history section")
+        void assemble_noHistorySectionInOutput() {
+            Document doc = new Document("void bar() {}",
+                    Map.of("chunk_type", "CODE", "element_name", "bar", "class_name", "Svc"));
+            RetrievalResult result = RetrievalResult.semantic(
+                    QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of(doc));
+
+            String context = assembler.assemble(result);
+
+            assertThat(context).doesNotContain("CONVERSATION HISTORY");
+        }
     }
 
     // ── Budget enforcement ────────────────────────────────────────────────────

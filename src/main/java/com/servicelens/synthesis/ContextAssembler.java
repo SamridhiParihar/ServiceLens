@@ -3,6 +3,7 @@ package com.servicelens.synthesis;
 import com.servicelens.graph.domain.ClassNode;
 import com.servicelens.graph.domain.MethodNode;
 import com.servicelens.retrieval.intent.RetrievalResult;
+import com.servicelens.session.ConversationTurn;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Component;
 
@@ -44,17 +45,32 @@ public class ContextAssembler {
      * Build a formatted context string from retrieval results, respecting the
      * character budget.
      *
-     * <p>Sections are appended in priority order: semantic code chunks first
-     * (highest information density), then graph structural results.  Once the
-     * running length exceeds {@link #MAX_CHARS} each append method returns
-     * early so later sections are not even formatted.
+     * <p>Delegates to {@link #assembleWithHistory(RetrievalResult, List)} with
+     * an empty history list — use this overload when session memory is not needed.
      *
      * @param result the populated retrieval result
      * @return assembled context string, truncated to {@link #MAX_CHARS} if necessary
      */
     public String assemble(RetrievalResult result) {
+        return assembleWithHistory(result, List.of());
+    }
+
+    /**
+     * Build a formatted context string that prepends recent conversation history
+     * before the retrieved code context.
+     *
+     * <p>History turns are injected first so the LLM can resolve follow-up
+     * references ("why is it failing?", "what happens next?") against the prior
+     * exchange.  The combined output is still capped at {@link #MAX_CHARS}.
+     *
+     * @param result  the populated retrieval result
+     * @param history the last N conversation turns from the active session
+     * @return assembled context string, truncated to {@link #MAX_CHARS} if necessary
+     */
+    public String assembleWithHistory(RetrievalResult result, List<ConversationTurn> history) {
         StringBuilder sb = new StringBuilder();
 
+        appendConversationHistory(sb, history);
         appendSemanticMatches(sb, result.semanticMatches());
         appendCallChain(sb, result.callChain());
         appendCallers(sb, result.callers());
@@ -69,6 +85,15 @@ public class ContextAssembler {
     }
 
     // ── Section renderers ─────────────────────────────────────────────────────
+
+    private void appendConversationHistory(StringBuilder sb, List<ConversationTurn> history) {
+        if (history.isEmpty()) return;
+        sb.append("=== CONVERSATION HISTORY ===\n");
+        for (ConversationTurn turn : history) {
+            sb.append("Q: ").append(turn.query()).append("\n");
+            sb.append("A: ").append(turn.answerSummary()).append("\n\n");
+        }
+    }
 
     private void appendSemanticMatches(StringBuilder sb, List<Document> matches) {
         if (matches.isEmpty()) return;

@@ -148,12 +148,15 @@ public abstract class FunctionalTestBase {
         // 2. PostgreSQL — remove all service registry entries
         jdbcTemplate.execute("DELETE FROM service_registry");
 
-        // 3. Neo4j — delete all nodes and relationships
+        // 3. PostgreSQL — remove all conversation sessions
+        jdbcTemplate.execute("DELETE FROM conversation_sessions");
+
+        // 4. Neo4j — delete all nodes and relationships
         try (Session session = neo4jDriver.session()) {
             session.run("MATCH (n) DETACH DELETE n").consume();
         }
 
-        // 4. FileFingerprinter hash files
+        // 5. FileFingerprinter hash files
         deleteDirectory(TEST_DATA_PATH);
     }
 

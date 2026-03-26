@@ -7,8 +7,12 @@ import com.servicelens.graph.domain.NodeType;
 import com.servicelens.retrieval.intent.IntentBasedRetriever;
 import com.servicelens.retrieval.intent.QueryIntent;
 import com.servicelens.retrieval.intent.RetrievalResult;
+import com.servicelens.session.ConversationSession;
+import com.servicelens.session.ConversationSessionService;
+import com.servicelens.session.ConversationTurn;
 import com.servicelens.synthesis.AnswerSynthesizer;
 import com.servicelens.synthesis.SynthesisResult;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -19,11 +23,15 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -50,8 +58,20 @@ class QueryControllerTest {
     @MockitoBean
     private AnswerSynthesizer synthesizer;
 
-    private static final String URL     = "/api/query";
-    private static final String ASK_URL = "/api/ask";
+    @MockitoBean
+    private ConversationSessionService sessionService;
+
+    private static final String URL      = "/api/query";
+    private static final String ASK_URL  = "/api/ask";
+    private static final UUID   TEST_SID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+    @BeforeEach
+    void stubSession() {
+        ConversationSession session = new ConversationSession(
+                TEST_SID, "order-svc", List.of(), Instant.now(), Instant.now());
+        lenient().when(sessionService.getOrCreate(any(), any())).thenReturn(session);
+        lenient().doNothing().when(sessionService).addTurn(any(), any(), any(), any());
+    }
 
     // ── Happy-path — semantic result ──────────────────────────────────────────
 
@@ -282,12 +302,12 @@ class QueryControllerTest {
     class AskEndpointTests {
 
         @Test
-        @DisplayName("Returns 200 with answer and synthesized flag")
-        void returns200WithAnswerAndSynthesizedFlag() throws Exception {
+        @DisplayName("Returns 200 with answer, synthesized flag, and sessionId")
+        void returns200WithAnswerSynthesizedFlagAndSessionId() throws Exception {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
-            when(synthesizer.synthesize(anyString(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any()))
                     .thenReturn(new SynthesisResult(
                             "The executionLoop runs up to 3 times.",
                             QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 2, true));
@@ -300,7 +320,8 @@ class QueryControllerTest {
                .andExpect(jsonPath("$.synthesized").value(true))
                .andExpect(jsonPath("$.intent").value("FIND_IMPLEMENTATION"))
                .andExpect(jsonPath("$.modelUsed").value("phi3"))
-               .andExpect(jsonPath("$.contextChunksUsed").value(2));
+               .andExpect(jsonPath("$.contextChunksUsed").value(2))
+               .andExpect(jsonPath("$.sessionId").value(TEST_SID.toString()));
         }
 
         @Test
@@ -313,7 +334,7 @@ class QueryControllerTest {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.85f, List.of(doc)));
-            when(synthesizer.synthesize(anyString(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any()))
                     .thenReturn(new SynthesisResult(
                             "Answer here.", QueryIntent.FIND_IMPLEMENTATION, 0.85f, "phi3", 1, true));
 
@@ -331,7 +352,7 @@ class QueryControllerTest {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.5f, List.of()));
-            when(synthesizer.synthesize(anyString(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any()))
                     .thenReturn(SynthesisResult.noContext(QueryIntent.FIND_IMPLEMENTATION, 0.5f));
 
             mvc.perform(post(ASK_URL)
@@ -360,7 +381,7 @@ class QueryControllerTest {
                     QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of());
 
             when(retriever.retrieve("my query", "my-svc")).thenReturn(retrieval);
-            when(synthesizer.synthesize(eq("my query"), eq(retrieval)))
+            when(synthesizer.synthesize(eq("my query"), eq(retrieval), any()))
                     .thenReturn(new SynthesisResult(
                             "answer", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 0, true));
 
@@ -370,7 +391,68 @@ class QueryControllerTest {
                .andExpect(status().isOk());
 
             verify(retriever).retrieve("my query", "my-svc");
-            verify(synthesizer).synthesize("my query", retrieval);
+            verify(synthesizer).synthesize(eq("my query"), eq(retrieval), any());
+        }
+
+        @Test
+        @DisplayName("Session turn is recorded after successful synthesis")
+        void sessionTurnRecordedAfterSynthesis() throws Exception {
+            when(retriever.retrieve(anyString(), anyString()))
+                    .thenReturn(RetrievalResult.semantic(
+                            QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
+            when(synthesizer.synthesize(anyString(), any(), any()))
+                    .thenReturn(new SynthesisResult(
+                            "The answer.", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 1, true));
+
+            mvc.perform(post(ASK_URL)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body("my query", "order-svc")))
+               .andExpect(status().isOk());
+
+            verify(sessionService).addTurn(
+                    eq(TEST_SID), eq("my query"), eq("FIND_IMPLEMENTATION"), eq("The answer."));
+        }
+    }
+
+    // ── GET /api/sessions/{id}/history ───────────────────────────────────────
+
+    @Nested
+    @DisplayName("GET /api/sessions/{id}/history")
+    class SessionHistoryEndpoint {
+
+        @Test
+        @DisplayName("Returns 200 with history list for valid sessionId")
+        void validSessionId_returns200WithHistory() throws Exception {
+            List<ConversationTurn> turns = List.of(
+                    new ConversationTurn("what calls X?", "TRACE_CALLERS", "It is called by Y."),
+                    new ConversationTurn("why does it fail?", "DEBUG_ERROR", "The root cause is Z.")
+            );
+            when(sessionService.getHistory(TEST_SID)).thenReturn(turns);
+
+            mvc.perform(get("/api/sessions/" + TEST_SID + "/history"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$").isArray())
+               .andExpect(jsonPath("$.length()").value(2))
+               .andExpect(jsonPath("$[0].query").value("what calls X?"))
+               .andExpect(jsonPath("$[1].intent").value("DEBUG_ERROR"));
+        }
+
+        @Test
+        @DisplayName("Returns empty array when session has no history")
+        void emptyHistory_returnsEmptyArray() throws Exception {
+            when(sessionService.getHistory(TEST_SID)).thenReturn(List.of());
+
+            mvc.perform(get("/api/sessions/" + TEST_SID + "/history"))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$").isArray())
+               .andExpect(jsonPath("$.length()").value(0));
+        }
+
+        @Test
+        @DisplayName("Returns 400 for invalid UUID format")
+        void invalidUuid_returns400() throws Exception {
+            mvc.perform(get("/api/sessions/not-a-uuid/history"))
+               .andExpect(status().isBadRequest());
         }
     }
 
@@ -378,7 +460,7 @@ class QueryControllerTest {
 
     private String body(String query, String serviceName) throws Exception {
         return objectMapper.writeValueAsString(
-                new QueryController.QueryRequest(query, serviceName));
+                new QueryController.QueryRequest(query, serviceName, null));
     }
 
     private static MethodNode methodNode(String simpleName, String qualifiedName,

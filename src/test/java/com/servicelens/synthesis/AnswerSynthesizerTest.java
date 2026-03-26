@@ -17,6 +17,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -54,6 +55,7 @@ class AnswerSynthesizerTest {
         lenient().when(callSpec.content()).thenReturn("The executionLoop runs up to 3 times.");
 
         lenient().when(contextAssembler.assemble(any())).thenReturn("assembled context");
+        lenient().when(contextAssembler.assembleWithHistory(any(), any())).thenReturn("assembled context");
     }
 
     // ── No context ────────────────────────────────────────────────────────────
@@ -93,7 +95,7 @@ class AnswerSynthesizerTest {
 
         SynthesisResult result = synthesizer.synthesize("how does executionLoop work?", retrieval);
 
-        verify(contextAssembler).assemble(retrieval);
+        verify(contextAssembler).assembleWithHistory(eq(retrieval), any());
         verify(chatClient).prompt();
         verify(callSpec).content();
         assertThat(result.synthesized()).isTrue();
@@ -126,11 +128,7 @@ class AnswerSynthesizerTest {
     @Test
     @DisplayName("Returns fallback when the LLM call throws")
     void llmThrows_returnsFallback() {
-        when(chatClient.prompt()).thenReturn(requestSpec);
-        when(requestSpec.options(any())).thenReturn(requestSpec);
-        when(requestSpec.system(anyString())).thenReturn(requestSpec);
-        when(requestSpec.user(anyString())).thenReturn(requestSpec);
-        when(requestSpec.call()).thenReturn(callSpec);
+        // Override only what differs from the lenient setUp stubs
         when(callSpec.content()).thenThrow(new RuntimeException("Ollama timeout"));
 
         RetrievalResult retrieval = retrievalWithOneChunk(QueryIntent.DEBUG_ERROR, 0.75f);

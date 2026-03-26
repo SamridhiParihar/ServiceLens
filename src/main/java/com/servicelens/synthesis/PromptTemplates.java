@@ -51,6 +51,9 @@ public final class PromptTemplates {
             - Use technical language appropriate for a senior developer audience.
             - When explaining flows, make the data transformation at each step clear \
             (what goes in, what comes out).
+            - If the developer requests a specific tone or style (e.g. "explain like a story", \
+            "ELI5", "keep it short", "use analogies"), honour that style while keeping all \
+            facts strictly grounded in the provided code context.
             """;
 
     // ── Public API ────────────────────────────────────────────────────────────

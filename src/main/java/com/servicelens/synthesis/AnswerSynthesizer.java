@@ -1,12 +1,15 @@
 package com.servicelens.synthesis;
 
 import com.servicelens.retrieval.intent.RetrievalResult;
+import com.servicelens.session.ConversationTurn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 /**
  * LLM-backed answer synthesis layer.
@@ -61,23 +64,45 @@ public class AnswerSynthesizer {
     /**
      * Synthesize a natural-language answer from the retrieved code context.
      *
+     * <p>Convenience overload with no conversation history — use for stateless queries
+     * or when the caller manages history injection independently.
+     *
      * @param query     the original user question
      * @param retrieval the populated retrieval result from the retrieval pipeline
      * @return a {@link SynthesisResult} containing the answer and provenance metadata;
      *         never {@code null}
      */
     public SynthesisResult synthesize(String query, RetrievalResult retrieval) {
-        if (retrieval.totalContextSize() == 0) {
+        return synthesize(query, retrieval, List.of());
+    }
+
+    /**
+     * Synthesize a natural-language answer, injecting prior conversation turns into
+     * the context so the LLM can resolve follow-up references.
+     *
+     * <p>If {@code history} is non-empty, it is prepended to the code context via
+     * {@link ContextAssembler#assembleWithHistory} so the LLM sees what was previously
+     * asked and answered before it processes the new question.
+     *
+     * @param query     the original user question
+     * @param retrieval the populated retrieval result from the retrieval pipeline
+     * @param history   recent conversation turns (last 2 turns recommended); may be empty
+     * @return a {@link SynthesisResult} containing the answer and provenance metadata;
+     *         never {@code null}
+     */
+    public SynthesisResult synthesize(String query, RetrievalResult retrieval,
+                                      List<ConversationTurn> history) {
+        if (retrieval.totalContextSize() == 0 && history.isEmpty()) {
             log.debug("No context available — returning fallback for intent={}", retrieval.intent());
             return SynthesisResult.noContext(retrieval.intent(), retrieval.intentConfidence());
         }
 
-        String context      = contextAssembler.assemble(retrieval);
+        String context      = contextAssembler.assembleWithHistory(retrieval, history);
         String systemPrompt = PromptTemplates.systemPrompt(retrieval.intent());
         String userPrompt   = PromptTemplates.userPrompt(query, context);
 
-        log.debug("Synthesizing: intent={} context_chars={} model={}",
-                retrieval.intent(), context.length(), modelName);
+        log.debug("Synthesizing: intent={} context_chars={} history_turns={} model={}",
+                retrieval.intent(), context.length(), history.size(), modelName);
 
         try {
             String answer = chatClient.prompt()
