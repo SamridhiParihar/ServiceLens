@@ -1,6 +1,7 @@
 package com.servicelens.synthesis;
 
 import com.servicelens.retrieval.intent.QueryIntent;
+import com.servicelens.synthesis.VerbosityLevel;
 
 /**
  * Intent-aware prompt templates for LLM answer synthesis.
@@ -20,6 +21,23 @@ public final class PromptTemplates {
     private PromptTemplates() {}
 
     // ── Base instruction — applies to every intent ────────────────────────────
+
+    /**
+     * Minimal system prompt used exclusively for SHORT verbosity.
+     * Contains only the grounding rules — no Response Format section so the
+     * LLM has no structural template to fall back to.
+     */
+    private static final String SHORT_SYSTEM = """
+            You are ServiceLens, an AI code intelligence assistant for Java/Spring Boot codebases.
+
+            ## Rules
+            - Answer based ONLY on the provided code context. Never invent code or classes not shown.
+            - Reference class and method names using inline code formatting (backticks).
+            - Answer in 3-5 sentences maximum.
+            - No headings. No bullet points. No numbered lists. No "Key Takeaway" section.
+            - If the answer is a list (e.g. "where is X used?"), write it as a single comma-separated sentence.
+            - Stop writing as soon as the question is fully answered.
+            """;
 
     private static final String BASE_SYSTEM = """
             You are ServiceLens, an expert AI code intelligence assistant that helps \
@@ -67,8 +85,44 @@ public final class PromptTemplates {
      * @param intent the classified query intent
      * @return fully composed system prompt string
      */
+    /**
+     * Returns the system prompt for the given intent using default (DETAILED) verbosity.
+     *
+     * @param intent the classified query intent
+     * @return fully composed system prompt string
+     */
     public static String systemPrompt(QueryIntent intent) {
-        return BASE_SYSTEM + "\n" + intentGuidance(intent);
+        return systemPrompt(intent, VerbosityLevel.DETAILED);
+    }
+
+    /**
+     * Returns the system prompt for the given intent and verbosity level.
+     *
+     * <p>For {@link VerbosityLevel#DETAILED} no verbosity override is appended —
+     * the existing {@code BASE_SYSTEM} format rules already describe detailed behaviour.
+     * For {@link VerbosityLevel#SHORT} and {@link VerbosityLevel#DEEP_DIVE} a high-priority
+     * override block is appended after the intent guidance so the LLM honours the
+     * requested verbosity over the default format rules.
+     *
+     * @param intent    the classified query intent
+     * @param verbosity the desired answer verbosity
+     * @return fully composed system prompt string
+     */
+    public static String systemPrompt(QueryIntent intent, VerbosityLevel verbosity) {
+        return switch (verbosity) {
+            // SHORT: skip intentGuidance entirely — its structural instructions
+            // (Overview / Step-by-step / Key design decisions) override any "be brief"
+            // instruction that comes after it. Without intentGuidance the LLM sees only
+            // the base rules + the SHORT constraint, which it reliably honours.
+            case SHORT -> SHORT_SYSTEM;
+
+            // DETAILED: current behaviour — no verbosity override needed
+            case DETAILED -> BASE_SYSTEM + "\n" + intentGuidance(intent);
+
+            // DEEP_DIVE: full structure + extended depth instruction
+            case DEEP_DIVE -> BASE_SYSTEM + "\n" + intentGuidance(intent)
+                    + "\n" + verbosityOverride(VerbosityLevel.DEEP_DIVE);
+        };
     }
 
     /**
@@ -94,6 +148,31 @@ public final class PromptTemplates {
 
                 Provide a detailed, well-structured answer following the format guidelines \
                 from your system instructions.""".formatted(context, query);
+    }
+
+    // ── Verbosity overrides ───────────────────────────────────────────────────
+
+    private static String verbosityOverride(VerbosityLevel verbosity) {
+        return switch (verbosity) {
+            case SHORT -> """
+                    ## Verbosity Override — SHORT (HIGHEST PRIORITY — overrides all format rules above)
+                    Answer in 3-5 sentences maximum. No headings. No bullet points. No numbered lists.
+                    No "Key Takeaway" section. If the answer is inherently a list (e.g. "where is X used?"), \
+                    express it as a single inline comma-separated sentence.
+                    Be direct. Stop as soon as the question is answered.
+                    """;
+            case DETAILED -> "";  // no override — BASE_SYSTEM + intentGuidance is already DETAILED
+            case DEEP_DIVE -> """
+                    ## Verbosity Override — DEEP DIVE (extend beyond the direct answer)
+                    After answering the direct question, also cover:
+                    - Related classes and methods not directly asked about but architecturally relevant
+                    - Edge cases, null paths, failure scenarios, and exception handling
+                    - Performance or scalability observations visible in the code
+                    - Architectural trade-offs and design pattern observations
+                    - Any surprising or non-obvious behaviour worth highlighting
+                    No length limit — be as thorough as the provided context allows.
+                    """;
+        };
     }
 
     // ── Intent-specific guidance ──────────────────────────────────────────────

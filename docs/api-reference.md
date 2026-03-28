@@ -247,15 +247,17 @@ Full pipeline: intent classification → retrieval → context assembly → Groq
 {
   "query": "Walk me through the call chain from submitOrder to the database",
   "serviceName": "my-service",
-  "sessionId": "a3f9c2d1-..."
+  "sessionId": "a3f9c2d1-...",
+  "verbosity": "DETAILED"
 }
 ```
 
-| Field | Required | Description |
-|---|---|---|
-| `query` | yes | The natural-language question |
-| `serviceName` | yes | The service to query (must be ingested) |
-| `sessionId` | no | UUID returned by a prior `/api/ask` response. When present the backend resumes the session and injects the last 2 conversation turns as context for the LLM. Omit or pass `null` to start a fresh session. |
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `query` | yes | — | The natural-language question |
+| `serviceName` | yes | — | The service to query (must be ingested) |
+| `sessionId` | no | `null` | UUID returned by a prior `/api/ask` response. When present the backend resumes the session and injects the last 2 conversation turns as context for the LLM. |
+| `verbosity` | no | `DETAILED` | Controls answer length and depth. `SHORT` = 3-5 sentences, no formatting. `DETAILED` = numbered steps, sections (default). `DEEP_DIVE` = full depth including edge cases and related classes. |
 
 **Response:**
 ```json

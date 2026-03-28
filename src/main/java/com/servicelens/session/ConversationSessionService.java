@@ -102,11 +102,11 @@ public class ConversationSessionService {
      * @param intent    the detected intent name (e.g. {@code "FIND_IMPLEMENTATION"})
      * @param answer    the full synthesized answer (will be summarised for storage)
      */
-    public void addTurn(UUID sessionId, String query, String intent, String answer) {
+    public void addTurn(UUID sessionId, String query, String intent, String answer, String verbosity) {
         String summary = (answer != null && answer.length() > SUMMARY_MAX_CHARS)
                 ? answer.substring(0, SUMMARY_MAX_CHARS)
                 : (answer != null ? answer : "");
-        repository.appendTurn(sessionId, new ConversationTurn(query, intent, summary));
+        repository.appendTurn(sessionId, new ConversationTurn(query, intent, summary, verbosity));
     }
 
     /**

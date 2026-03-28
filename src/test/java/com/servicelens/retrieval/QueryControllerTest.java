@@ -12,6 +12,7 @@ import com.servicelens.session.ConversationSessionService;
 import com.servicelens.session.ConversationTurn;
 import com.servicelens.synthesis.AnswerSynthesizer;
 import com.servicelens.synthesis.SynthesisResult;
+import com.servicelens.synthesis.VerbosityLevel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -70,7 +71,7 @@ class QueryControllerTest {
         ConversationSession session = new ConversationSession(
                 TEST_SID, "order-svc", List.of(), Instant.now(), Instant.now());
         lenient().when(sessionService.getOrCreate(any(), any())).thenReturn(session);
-        lenient().doNothing().when(sessionService).addTurn(any(), any(), any(), any());
+        lenient().doNothing().when(sessionService).addTurn(any(), any(), any(), any(), any());
     }
 
     // ── Happy-path — semantic result ──────────────────────────────────────────
@@ -307,7 +308,7 @@ class QueryControllerTest {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
-            when(synthesizer.synthesize(anyString(), any(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any(), any()))
                     .thenReturn(new SynthesisResult(
                             "The executionLoop runs up to 3 times.",
                             QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 2, true));
@@ -334,7 +335,7 @@ class QueryControllerTest {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.85f, List.of(doc)));
-            when(synthesizer.synthesize(anyString(), any(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any(), any()))
                     .thenReturn(new SynthesisResult(
                             "Answer here.", QueryIntent.FIND_IMPLEMENTATION, 0.85f, "phi3", 1, true));
 
@@ -352,7 +353,7 @@ class QueryControllerTest {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.5f, List.of()));
-            when(synthesizer.synthesize(anyString(), any(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any(), any()))
                     .thenReturn(SynthesisResult.noContext(QueryIntent.FIND_IMPLEMENTATION, 0.5f));
 
             mvc.perform(post(ASK_URL)
@@ -361,6 +362,61 @@ class QueryControllerTest {
                .andExpect(status().isOk())
                .andExpect(jsonPath("$.synthesized").value(false))
                .andExpect(jsonPath("$.answer").isString());
+        }
+
+        @Test
+        @DisplayName("SHORT verbosity is passed to synthesizer and stored in turn")
+        void shortVerbosity_passedToSynthesizerAndStoredInTurn() throws Exception {
+            when(retriever.retrieve(anyString(), anyString()))
+                    .thenReturn(RetrievalResult.semantic(QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
+            when(synthesizer.synthesize(anyString(), any(), any(), eq(VerbosityLevel.SHORT)))
+                    .thenReturn(new SynthesisResult(
+                            "Short answer.", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 0, true));
+
+            mvc.perform(post(ASK_URL)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(bodyWithVerbosity("quick question", "svc", VerbosityLevel.SHORT)))
+               .andExpect(status().isOk())
+               .andExpect(jsonPath("$.answer").value("Short answer."));
+
+            verify(synthesizer).synthesize(anyString(), any(), any(), eq(VerbosityLevel.SHORT));
+            verify(sessionService).addTurn(any(), any(), any(), any(), eq("SHORT"));
+        }
+
+        @Test
+        @DisplayName("DEEP_DIVE verbosity is passed to synthesizer and stored in turn")
+        void deepDiveVerbosity_passedToSynthesizerAndStoredInTurn() throws Exception {
+            when(retriever.retrieve(anyString(), anyString()))
+                    .thenReturn(RetrievalResult.semantic(QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
+            when(synthesizer.synthesize(anyString(), any(), any(), eq(VerbosityLevel.DEEP_DIVE)))
+                    .thenReturn(new SynthesisResult(
+                            "Deep answer.", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 0, true));
+
+            mvc.perform(post(ASK_URL)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(bodyWithVerbosity("deep question", "svc", VerbosityLevel.DEEP_DIVE)))
+               .andExpect(status().isOk());
+
+            verify(synthesizer).synthesize(anyString(), any(), any(), eq(VerbosityLevel.DEEP_DIVE));
+            verify(sessionService).addTurn(any(), any(), any(), any(), eq("DEEP_DIVE"));
+        }
+
+        @Test
+        @DisplayName("Null verbosity defaults to DETAILED")
+        void nullVerbosity_defaultsToDetailed() throws Exception {
+            when(retriever.retrieve(anyString(), anyString()))
+                    .thenReturn(RetrievalResult.semantic(QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
+            when(synthesizer.synthesize(anyString(), any(), any(), eq(VerbosityLevel.DETAILED)))
+                    .thenReturn(new SynthesisResult(
+                            "Detailed answer.", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 0, true));
+
+            mvc.perform(post(ASK_URL)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body("question", "svc")))
+               .andExpect(status().isOk());
+
+            verify(synthesizer).synthesize(anyString(), any(), any(), eq(VerbosityLevel.DETAILED));
+            verify(sessionService).addTurn(any(), any(), any(), any(), eq("DETAILED"));
         }
 
         @Test
@@ -381,7 +437,7 @@ class QueryControllerTest {
                     QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of());
 
             when(retriever.retrieve("my query", "my-svc")).thenReturn(retrieval);
-            when(synthesizer.synthesize(eq("my query"), eq(retrieval), any()))
+            when(synthesizer.synthesize(eq("my query"), eq(retrieval), any(), any()))
                     .thenReturn(new SynthesisResult(
                             "answer", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 0, true));
 
@@ -391,7 +447,7 @@ class QueryControllerTest {
                .andExpect(status().isOk());
 
             verify(retriever).retrieve("my query", "my-svc");
-            verify(synthesizer).synthesize(eq("my query"), eq(retrieval), any());
+            verify(synthesizer).synthesize(eq("my query"), eq(retrieval), any(), any());
         }
 
         @Test
@@ -400,7 +456,7 @@ class QueryControllerTest {
             when(retriever.retrieve(anyString(), anyString()))
                     .thenReturn(RetrievalResult.semantic(
                             QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of()));
-            when(synthesizer.synthesize(anyString(), any(), any()))
+            when(synthesizer.synthesize(anyString(), any(), any(), any()))
                     .thenReturn(new SynthesisResult(
                             "The answer.", QueryIntent.FIND_IMPLEMENTATION, 0.9f, "phi3", 1, true));
 
@@ -410,7 +466,7 @@ class QueryControllerTest {
                .andExpect(status().isOk());
 
             verify(sessionService).addTurn(
-                    eq(TEST_SID), eq("my query"), eq("FIND_IMPLEMENTATION"), eq("The answer."));
+                    eq(TEST_SID), eq("my query"), eq("FIND_IMPLEMENTATION"), eq("The answer."), eq("DETAILED"));
         }
     }
 
@@ -424,8 +480,8 @@ class QueryControllerTest {
         @DisplayName("Returns 200 with history list for valid sessionId")
         void validSessionId_returns200WithHistory() throws Exception {
             List<ConversationTurn> turns = List.of(
-                    new ConversationTurn("what calls X?", "TRACE_CALLERS", "It is called by Y."),
-                    new ConversationTurn("why does it fail?", "DEBUG_ERROR", "The root cause is Z.")
+                    new ConversationTurn("what calls X?", "TRACE_CALLERS", "It is called by Y.", "DETAILED"),
+                    new ConversationTurn("why does it fail?", "DEBUG_ERROR", "The root cause is Z.", "SHORT")
             );
             when(sessionService.getHistory(TEST_SID)).thenReturn(turns);
 
@@ -460,7 +516,12 @@ class QueryControllerTest {
 
     private String body(String query, String serviceName) throws Exception {
         return objectMapper.writeValueAsString(
-                new QueryController.QueryRequest(query, serviceName, null));
+                new QueryController.QueryRequest(query, serviceName, null, null));
+    }
+
+    private String bodyWithVerbosity(String query, String serviceName, VerbosityLevel verbosity) throws Exception {
+        return objectMapper.writeValueAsString(
+                new QueryController.QueryRequest(query, serviceName, null, verbosity));
     }
 
     private static MethodNode methodNode(String simpleName, String qualifiedName,

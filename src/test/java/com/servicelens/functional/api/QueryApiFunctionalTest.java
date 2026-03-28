@@ -150,7 +150,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     void blankQuery_returns400() {
         ResponseEntity<Object> response = restTemplate.postForEntity(
                 url("/api/query"),
-                new QueryRequest("", SERVICE, null),
+                new QueryRequest("", SERVICE, null, null),
                 Object.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -161,7 +161,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     void blankServiceName_returns400() {
         ResponseEntity<Object> response = restTemplate.postForEntity(
                 url("/api/query"),
-                new QueryRequest("valid query", "", null),
+                new QueryRequest("valid query", "", null, null),
                 Object.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -202,7 +202,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     void ask_returns200WithNonBlankAnswer() {
         ResponseEntity<AskResponse> response = restTemplate.postForEntity(
                 url("/api/ask"),
-                new QueryRequest("how does processPayment work", SERVICE, null),
+                new QueryRequest("how does processPayment work", SERVICE, null, null),
                 AskResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -220,7 +220,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     void ask_responseIncludesRetrieval() {
         ResponseEntity<AskResponse> response = restTemplate.postForEntity(
                 url("/api/ask"),
-                new QueryRequest("where is createOrder implemented", SERVICE, null),
+                new QueryRequest("where is createOrder implemented", SERVICE, null, null),
                 AskResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -236,7 +236,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     void ask_unindexedService_returnsFallback() {
         ResponseEntity<AskResponse> response = restTemplate.postForEntity(
                 url("/api/ask"),
-                new QueryRequest("anything", "never-ingested-svc", null),
+                new QueryRequest("anything", "never-ingested-svc", null, null),
                 AskResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -251,7 +251,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     void ask_blankQuery_returns400() {
         ResponseEntity<Object> response = restTemplate.postForEntity(
                 url("/api/ask"),
-                new QueryRequest("", SERVICE, null),
+                new QueryRequest("", SERVICE, null, null),
                 Object.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -262,7 +262,7 @@ class QueryApiFunctionalTest extends FunctionalTestBase {
     private ResponseEntity<QueryResponse> post(String query, String serviceName) {
         return restTemplate.postForEntity(
                 url("/api/query"),
-                new QueryRequest(query, serviceName, null),
+                new QueryRequest(query, serviceName, null, null),
                 QueryResponse.class);
     }
 

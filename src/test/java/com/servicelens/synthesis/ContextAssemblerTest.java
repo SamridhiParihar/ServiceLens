@@ -200,7 +200,7 @@ class ContextAssemblerTest {
         @DisplayName("assembleWithHistory prepends history section before code context")
         void historyPrependedBeforeCodeContext() {
             ConversationTurn turn = new ConversationTurn(
-                    "what calls processPayment?", "TRACE_CALLERS", "It is called by CheckoutService.");
+                    "what calls processPayment?", "TRACE_CALLERS", "It is called by CheckoutService.", "DETAILED");
             Document doc = new Document("void processPayment() {}",
                     Map.of("chunk_type", "CODE", "element_name", "processPayment",
                            "class_name", "PaymentService", "service_name", "svc"));
@@ -235,8 +235,8 @@ class ContextAssemblerTest {
         @DisplayName("Multiple history turns all appear in context")
         void multipleTurns_allAppearInContext() {
             List<ConversationTurn> turns = List.of(
-                    new ConversationTurn("q1", "FIND_IMPLEMENTATION", "a1"),
-                    new ConversationTurn("q2", "TRACE_CALLERS", "a2")
+                    new ConversationTurn("q1", "FIND_IMPLEMENTATION", "a1", "DETAILED"),
+                    new ConversationTurn("q2", "TRACE_CALLERS", "a2", "SHORT")
             );
             RetrievalResult result = RetrievalResult.semantic(
                     QueryIntent.FIND_IMPLEMENTATION, 0.9f, List.of());

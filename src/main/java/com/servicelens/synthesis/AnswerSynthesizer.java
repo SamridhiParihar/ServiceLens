@@ -2,6 +2,7 @@ package com.servicelens.synthesis;
 
 import com.servicelens.retrieval.intent.RetrievalResult;
 import com.servicelens.session.ConversationTurn;
+import com.servicelens.synthesis.VerbosityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -73,7 +74,7 @@ public class AnswerSynthesizer {
      *         never {@code null}
      */
     public SynthesisResult synthesize(String query, RetrievalResult retrieval) {
-        return synthesize(query, retrieval, List.of());
+        return synthesize(query, retrieval, List.of(), VerbosityLevel.DETAILED);
     }
 
     /**
@@ -92,17 +93,31 @@ public class AnswerSynthesizer {
      */
     public SynthesisResult synthesize(String query, RetrievalResult retrieval,
                                       List<ConversationTurn> history) {
+        return synthesize(query, retrieval, history, VerbosityLevel.DETAILED);
+    }
+
+    /**
+     * Synthesize a natural-language answer with conversation history and verbosity control.
+     *
+     * @param query     the original user question
+     * @param retrieval the populated retrieval result
+     * @param history   recent conversation turns (last 2 recommended); may be empty
+     * @param verbosity controls answer length and depth
+     * @return a {@link SynthesisResult}; never {@code null}
+     */
+    public SynthesisResult synthesize(String query, RetrievalResult retrieval,
+                                      List<ConversationTurn> history, VerbosityLevel verbosity) {
         if (retrieval.totalContextSize() == 0 && history.isEmpty()) {
             log.debug("No context available — returning fallback for intent={}", retrieval.intent());
             return SynthesisResult.noContext(retrieval.intent(), retrieval.intentConfidence());
         }
 
         String context      = contextAssembler.assembleWithHistory(retrieval, history);
-        String systemPrompt = PromptTemplates.systemPrompt(retrieval.intent());
+        String systemPrompt = PromptTemplates.systemPrompt(retrieval.intent(), verbosity);
         String userPrompt   = PromptTemplates.userPrompt(query, context);
 
-        log.debug("Synthesizing: intent={} context_chars={} history_turns={} model={}",
-                retrieval.intent(), context.length(), history.size(), modelName);
+        log.debug("Synthesizing: intent={} verbosity={} context_chars={} history_turns={} model={}",
+                retrieval.intent(), verbosity, context.length(), history.size(), modelName);
 
         try {
             String answer = chatClient.prompt()

@@ -155,9 +155,9 @@ class ConversationSessionServiceTest {
         @DisplayName("Appends turn with truncated answer summary")
         void appendsTurnWithTruncatedSummary() {
             UUID sessionId = UUID.randomUUID();
-            String longAnswer = "A".repeat(300);
+            String longAnswer = "A".repeat(600);
 
-            service.addTurn(sessionId, "how does X work?", "FIND_IMPLEMENTATION", longAnswer);
+            service.addTurn(sessionId, "how does X work?", "FIND_IMPLEMENTATION", longAnswer, "DETAILED");
 
             ArgumentCaptor<ConversationTurn> captor = ArgumentCaptor.forClass(ConversationTurn.class);
             verify(repository).appendTurn(eq(sessionId), captor.capture());
@@ -166,6 +166,7 @@ class ConversationSessionServiceTest {
             assertThat(turn.query()).isEqualTo("how does X work?");
             assertThat(turn.intent()).isEqualTo("FIND_IMPLEMENTATION");
             assertThat(turn.answerSummary()).hasSize(ConversationSessionService.SUMMARY_MAX_CHARS);
+            assertThat(turn.verbosity()).isEqualTo("DETAILED");
         }
 
         @Test
@@ -174,12 +175,13 @@ class ConversationSessionServiceTest {
             UUID sessionId = UUID.randomUUID();
             String shortAnswer = "The loop runs 3 times.";
 
-            service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", shortAnswer);
+            service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", shortAnswer, "SHORT");
 
             ArgumentCaptor<ConversationTurn> captor = ArgumentCaptor.forClass(ConversationTurn.class);
             verify(repository).appendTurn(eq(sessionId), captor.capture());
 
             assertThat(captor.getValue().answerSummary()).isEqualTo(shortAnswer);
+            assertThat(captor.getValue().verbosity()).isEqualTo("SHORT");
         }
 
         @Test
@@ -187,12 +189,13 @@ class ConversationSessionServiceTest {
         void nullAnswer_storesEmptySummary() {
             UUID sessionId = UUID.randomUUID();
 
-            service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", null);
+            service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", null, "DEEP_DIVE");
 
             ArgumentCaptor<ConversationTurn> captor = ArgumentCaptor.forClass(ConversationTurn.class);
             verify(repository).appendTurn(eq(sessionId), captor.capture());
 
             assertThat(captor.getValue().answerSummary()).isEmpty();
+            assertThat(captor.getValue().verbosity()).isEqualTo("DEEP_DIVE");
         }
     }
 
@@ -207,8 +210,8 @@ class ConversationSessionServiceTest {
         void sessionFound_returnsHistory() {
             UUID sessionId = UUID.randomUUID();
             List<ConversationTurn> turns = List.of(
-                    new ConversationTurn("q1", "FIND_IMPLEMENTATION", "a1"),
-                    new ConversationTurn("q2", "TRACE_CALLERS", "a2")
+                    new ConversationTurn("q1", "FIND_IMPLEMENTATION", "a1", "DETAILED"),
+                    new ConversationTurn("q2", "TRACE_CALLERS", "a2", "SHORT")
             );
             ConversationSession session = new ConversationSession(
                     sessionId, "svc", turns, Instant.now(), Instant.now());

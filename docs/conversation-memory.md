@@ -64,8 +64,8 @@ CREATE TABLE conversation_sessions (
 The `history` column is a JSONB array of turn objects:
 ```json
 [
-  { "query": "...", "intent": "FIND_IMPLEMENTATION", "answerSummary": "..." },
-  { "query": "...", "intent": "TRACE_CALLERS",       "answerSummary": "..." }
+  { "query": "...", "intent": "FIND_IMPLEMENTATION", "answerSummary": "...", "verbosity": "DETAILED" },
+  { "query": "...", "intent": "TRACE_CALLERS",       "answerSummary": "...", "verbosity": "SHORT" }
 ]
 ```
 
@@ -119,7 +119,7 @@ This means there is no way for conversation history from one service to bleed in
 
 | File | Role |
 |---|---|
-| `session/ConversationTurn.java` | Single turn: query + intent + answerSummary |
+| `session/ConversationTurn.java` | Single turn: query + intent + answerSummary + verbosity |
 | `session/ConversationSession.java` | Session record: sessionId + serviceName + history + timestamps |
 | `session/ConversationSessionRepository.java` | JDBC-backed Postgres operations |
 | `session/ConversationSessionService.java` | Lifecycle facade: getOrCreate, addTurn, getHistory |

@@ -10,6 +10,7 @@ import com.servicelens.session.ConversationSessionService;
 import com.servicelens.session.ConversationTurn;
 import com.servicelens.synthesis.AnswerSynthesizer;
 import com.servicelens.synthesis.SynthesisResult;
+import com.servicelens.synthesis.VerbosityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.document.Document;
@@ -127,15 +128,17 @@ public class QueryController {
                 : session.history();
 
         // ── Retrieval + synthesis ─────────────────────────────────────────────
+        VerbosityLevel verbosity = request.verbosity() != null ? request.verbosity() : VerbosityLevel.DETAILED;
         RetrievalResult retrieval = retriever.retrieve(request.query(), request.serviceName());
-        SynthesisResult synthesis = synthesizer.synthesize(request.query(), retrieval, history);
+        SynthesisResult synthesis = synthesizer.synthesize(request.query(), retrieval, history, verbosity);
 
         // ── Persist the completed turn ────────────────────────────────────────
         sessionService.addTurn(
                 session.sessionId(),
                 request.query(),
                 synthesis.intent().name(),
-                synthesis.answer());
+                synthesis.answer(),
+                verbosity.name());
 
         log.debug("Ask complete: synthesized={} intent={} sessionId={}",
                 synthesis.synthesized(), synthesis.intent(), session.sessionId());
@@ -182,8 +185,11 @@ public class QueryController {
      *                    when provided the backend resumes the existing session and
      *                    injects prior conversation turns as context.  Omit or pass
      *                    {@code null} to start a fresh session.
+     * @param verbosity   controls answer length and depth; defaults to {@link VerbosityLevel#DETAILED}
+     *                    when omitted or {@code null}.
      */
-    public record QueryRequest(String query, String serviceName, String sessionId) {}
+    public record QueryRequest(String query, String serviceName, String sessionId,
+                               VerbosityLevel verbosity) {}
 
     /**
      * Structured response from the intent-based retrieval pipeline.
