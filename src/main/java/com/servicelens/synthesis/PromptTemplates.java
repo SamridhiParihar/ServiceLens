@@ -48,27 +48,11 @@ public final class PromptTemplates {
             or methods that are not shown.
             - If the context is insufficient, state what is missing and what additional \
             context would be needed.
-            - Reference specific class names, method names, and annotations using \
+            - Reference class names, method names, and annotations using \
             inline code formatting (backticks).
-
-            ## Response Format
-            - Start with a brief 1-2 sentence summary answering the question directly.
-            - Follow with a detailed breakdown using **numbered steps** for flows/processes \
-            or **bullet points** for lists of items.
-            - Use **bold** for key terms, class names in first mention, and important concepts.
-            - When showing method signatures or short code references, use `inline code`.
-            - For multi-step flows, clearly label each step with what class/method owns it.
-            - Group related information under markdown headings (##, ###) when the answer \
-            covers multiple distinct topics.
-            - End with a brief "Key takeaway" or "Note" if there are important caveats, \
-            limitations, or architectural observations worth highlighting.
-
-            ## Style
-            - Be thorough but not verbose — every sentence should add information.
-            - Avoid filler phrases like "Great question!" or "Let me explain".
+            - Use **bold** for key terms and class names on first mention.
+            - No filler phrases like "Great question!" or "Let me explain".
             - Use technical language appropriate for a senior developer audience.
-            - When explaining flows, make the data transformation at each step clear \
-            (what goes in, what comes out).
             - If the developer requests a specific tone or style (e.g. "explain like a story", \
             "ELI5", "keep it short", "use analogies"), honour that style while keeping all \
             facts strictly grounded in the provided code context.
@@ -76,15 +60,6 @@ public final class PromptTemplates {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /**
-     * Returns the system prompt for the given intent.
-     *
-     * <p>Combines the shared base instruction with an intent-specific guidance
-     * paragraph that steers the LLM toward the right reasoning mode.
-     *
-     * @param intent the classified query intent
-     * @return fully composed system prompt string
-     */
     /**
      * Returns the system prompt for the given intent using default (DETAILED) verbosity.
      *
@@ -98,11 +73,15 @@ public final class PromptTemplates {
     /**
      * Returns the system prompt for the given intent and verbosity level.
      *
-     * <p>For {@link VerbosityLevel#DETAILED} no verbosity override is appended —
-     * the existing {@code BASE_SYSTEM} format rules already describe detailed behaviour.
-     * For {@link VerbosityLevel#SHORT} and {@link VerbosityLevel#DEEP_DIVE} a high-priority
-     * override block is appended after the intent guidance so the LLM honours the
-     * requested verbosity over the default format rules.
+     * <p>{@code BASE_SYSTEM} contains only universal grounding rules — no Response Format
+     * section.  Format is entirely owned by each {@link #intentGuidance(QueryIntent)} block
+     * so every intent produces output that is natural for its query type.</p>
+     *
+     * <ul>
+     *   <li>{@link VerbosityLevel#SHORT} — uses {@code SHORT_SYSTEM} only; no base, no intent guidance.</li>
+     *   <li>{@link VerbosityLevel#DETAILED} — {@code BASE_SYSTEM} + intent guidance (default).</li>
+     *   <li>{@link VerbosityLevel#DEEP_DIVE} — {@code BASE_SYSTEM} + intent guidance + depth extension block.</li>
+     * </ul>
      *
      * @param intent    the classified query intent
      * @param verbosity the desired answer verbosity
@@ -203,12 +182,12 @@ public final class PromptTemplates {
 
             case TRACE_CALLERS -> """
                     ## Intent: Find Callers
-                    Identify everything that calls this code:
-                    1. **Direct callers** — list each caller with its class and method name
-                    2. **Invocation context** — under what conditions does each caller invoke this? \
-                    (e.g. on HTTP request, scheduled job, event listener)
-                    3. **Parameters passed** — what data does each caller provide?
-                    4. **Return value usage** — how does each caller use the result?
+                    For each caller found in the context, write one entry:
+                    - **`ClassName.methodName()`** — when/why it calls this (e.g. on HTTP request, \
+                    scheduled job, event listener); what arguments it passes; what it does with \
+                    the return value.
+                    List every distinct caller. No numbered sections. If multiple callers belong \
+                    to the same class, group them under a **`ClassName`** heading.
                     """;
 
             case IMPACT_ANALYSIS -> """
@@ -244,12 +223,12 @@ public final class PromptTemplates {
 
             case DEBUG_ERROR -> """
                     ## Intent: Debug Error
-                    Diagnose the issue systematically:
-                    1. **Root cause** — identify the most likely reason for the error
+                    Start immediately with the root cause — no introductory summary or preamble.
+                    1. **Root cause** — the most likely reason for the error, stated directly
                     2. **Why it happens** — trace the code path that leads to the failure
-                    3. **Evidence** — point to specific lines/conditions in the context that confirm the diagnosis
-                    4. **Fix suggestions** — provide concrete code-level fixes, ordered by likelihood of success
-                    5. **Prevention** — suggest guards or patterns to prevent recurrence
+                    3. **Evidence** — specific lines or conditions in the context that confirm the diagnosis
+                    4. **Fix** — concrete code-level fix(es), ordered by likelihood of success
+                    5. **Prevention** — guard or pattern to prevent recurrence
                     """;
 
             case NULL_SAFETY -> """
@@ -265,23 +244,24 @@ public final class PromptTemplates {
 
             case UNDERSTAND_BUSINESS_RULE -> """
                     ## Intent: Explain Business Rule
-                    Translate the code into business language:
-                    1. **What it does** — explain in plain terms a product manager would understand
-                    2. **Business rule** — what rule or policy is being enforced?
-                    3. **Conditions** — under what circumstances does this rule apply?
-                    4. **Outcomes** — what happens when the rule passes vs. fails?
-                    Keep technical jargon minimal. Use concrete examples where helpful.
+                    Write in plain English paragraphs, as if explaining in a Slack message \
+                    to a product manager. No headings. No numbered lists. No bullet points.
+                    Cover: what the rule does in plain language, what conditions trigger it, \
+                    what happens when it passes vs. fails, and concrete examples visible in the code.
+                    Keep technical jargon minimal — use class and method names as supporting \
+                    references only, never as the lead.
                     """;
 
             case FIND_ENDPOINTS -> """
                     ## Intent: List HTTP Endpoints
-                    For each endpoint, provide a structured summary:
-                    - **Route**: `HTTP_METHOD /path`
-                    - **Purpose**: what this endpoint does
-                    - **Auth**: required roles or permissions (from `@RequireRole`, `@PreAuthorize`, etc.)
-                    - **Request**: expected body/params with types
-                    - **Response**: returned object and status code
-                    Group endpoints by resource/controller. Use a table format if there are many.
+                    Always present endpoints as a markdown table — no bullet points or prose.
+
+                    | Method | Path | Auth | Request Body / Params | Response |
+                    |---|---|---|---|---|
+
+                    Fill every column from the context. Use `—` if a detail is not shown. \
+                    If more than one controller is involved, add a **`ControllerName`** heading \
+                    above each table.
                     """;
 
             case FIND_TESTS -> """

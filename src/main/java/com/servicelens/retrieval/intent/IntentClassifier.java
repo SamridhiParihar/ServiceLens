@@ -70,14 +70,16 @@ public class IntentClassifier {
                             "what happens", "what does.*call", "what does.*trigger",
                             "what is triggered", "call chain", "call flow",
                             "execution flow", "what is called by", "sequence of calls",
-                            "downstream", "what does.*invoke"
+                            "downstream", "what does.*invoke",
+                            "flow", "walk.*through", "execution path"
                     )),
 
                     // ── TRACE_CALLERS — "who calls X" ─────────────────────────────
                     Map.entry(QueryIntent.TRACE_CALLERS, List.of(
                             "who calls", "what calls", "which.*call",
                             "callers of", "where is.*called", "where is.*invoked",
-                            "called from", "invoked from", "upstream callers"
+                            "called from", "invoked from", "upstream callers",
+                            "where does.*call", "who invokes"
                     )),
 
                     // ── FIND_CONFIGURATION — "how is X configured" ───────────────
@@ -104,7 +106,8 @@ public class IntentClassifier {
                             "nullpointer", "npe", "null pointer",
                             "why is.*failing", "why does.*fail",
                             "timeout error", "connection refused",
-                            "404", "500", "400", "503"
+                            "404", "500", "400", "503",
+                            "not working", "isn't working", "doesn't work"
                     )),
 
                     // ── NULL_SAFETY — null checks ─────────────────────────────────
@@ -133,7 +136,8 @@ public class IntentClassifier {
                     Map.entry(QueryIntent.FIND_ENDPOINTS, List.of(
                             "endpoint", "rest", "api endpoint", "controller",
                             "http method", "get mapping", "post mapping",
-                            "what routes", "what urls", "what apis", "routes"
+                            "what routes", "what urls", "what apis", "routes",
+                            "apis"
                     )),
 
                     // ── FIND_IMPLEMENTATION — default "where is X" ───────────────

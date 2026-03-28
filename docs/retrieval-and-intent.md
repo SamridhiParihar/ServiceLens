@@ -27,16 +27,16 @@ An LLM classifier would add ~500ms latency on every query. Since intents are wel
 
 | Intent | Example Query | Primary Signal Words |
 |---|---|---|
-| `FIND_IMPLEMENTATION` | "How does processOrder work?" | how does, implementation of, show me, what does X do |
-| `TRACE_CALL_CHAIN` | "Walk me through the call chain from submitOrder" | call chain, trace, walk through, execution path, flow from |
-| `TRACE_CALLERS` | "Who calls processPayment?" | who calls, callers of, called by, what calls |
-| `IMPACT_ANALYSIS` | "What breaks if I change OrderService?" | impact, what breaks, depends on, affects, changing X |
-| `FIND_CONFIGURATION` | "How is the database configured?" | configuration, config, property, settings, environment |
+| `FIND_IMPLEMENTATION` | "How does processOrder work?" | how does, show me, where is, which class, how is implemented |
+| `TRACE_CALL_CHAIN` | "What is the payment flow?" | call chain, flow, execution flow, execution path, walk through, what happens, downstream |
+| `TRACE_CALLERS` | "Who calls processPayment?" | who calls, callers of, what calls, where is called, where does X get called, who invokes |
+| `IMPACT_ANALYSIS` | "What breaks if I change OrderService?" | impact, what breaks, depends on, who uses, if I change |
+| `FIND_CONFIGURATION` | "How is the database configured?" | configuration, config, property, settings, timeout, limit |
 | `UNDERSTAND_CONTRACT` | "What does the PaymentGateway interface define?" | interface, contract, abstract, overrides, implements |
-| `DEBUG_ERROR` | "Why is NullPointerException thrown in checkout?" | error, exception, bug, NPE, fails, throws, broken |
+| `DEBUG_ERROR` | "The payment service is not working" | error, exception, failing, broken, not working, isn't working, doesn't work, NPE, throws |
 | `NULL_SAFETY` | "Is order ever null-checked before use?" | null, null check, nullable, NPE, null safety |
 | `UNDERSTAND_BUSINESS_RULE` | "What is the business rule for discount eligibility?" | business rule, business logic, why, requirement, policy |
-| `FIND_ENDPOINTS` | "What REST endpoints does OrderController expose?" | endpoint, API, REST, route, controller, mapping |
+| `FIND_ENDPOINTS` | "What REST endpoints does OrderController expose?" | endpoint, apis, REST, route, controller, mapping, what urls |
 | `FIND_TESTS` | "Are there tests for the payment flow?" | test, spec, unit test, integration test, test coverage |
 
 ---

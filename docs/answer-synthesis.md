@@ -49,24 +49,35 @@ Sections are only included if the corresponding `RetrievalResult` field is non-e
 
 Static class providing intent-aware system prompts.
 
-**Base instruction (applied to all intents):**
-- Answer based only on the provided code context
-- Reference specific class/method names from the context
-- Use markdown formatting (code blocks, headers, bullet points)
-- Say "I don't see evidence of that in the provided context" rather than guessing
+**Base instruction (applied to all intents — universal rules only):**
+- Answer based only on the provided code context; never invent classes or methods not shown
+- Reference class/method names using inline code formatting (backticks)
+- Use **bold** for key terms and class names on first mention
+- No filler phrases; technical language for senior developers
+- Honour user-requested tone or style (ELI5, story, analogy, etc.)
 
-**Intent-specific guidance (selected examples):**
+The base instruction has **no global Response Format section** — format is fully owned by each intent's guidance block.
 
-| Intent | Additional Instruction |
+**Intent-specific format guidance:**
+
+| Intent | Format |
 |---|---|
-| `FIND_IMPLEMENTATION` | Explain how the implementation works step-by-step |
-| `TRACE_CALL_CHAIN` | Describe the execution path in order, including conditional branches |
-| `TRACE_CALLERS` | List all callers, describe context in which each calls the method |
-| `IMPACT_ANALYSIS` | List what would be affected, explain why each dependency exists |
-| `DEBUG_ERROR` | Identify the likely root cause, suggest investigation steps |
-| `NULL_SAFETY` | Identify null-unsafe access patterns, suggest fixes |
-| `UNDERSTAND_BUSINESS_RULE` | Extract the business rule in plain language, separate from implementation details |
-| `FIND_ENDPOINTS` | List endpoints in a table (method, path, description) |
+| `FIND_IMPLEMENTATION` | Numbered breakdown: Overview → Step-by-step → Key design decisions → Data flow |
+| `TRACE_CALL_CHAIN` | Numbered execution trace with `→` notation; entry point to terminal operation |
+| `TRACE_CALLERS` | Flat list — one entry per caller: class/method, when invoked, args passed, return usage |
+| `IMPACT_ANALYSIS` | Numbered: direct dependents → transitive impacts → layer breakdown → risk assessment |
+| `FIND_CONFIGURATION` | Bullet per property: name, purpose, default, runtime effect |
+| `UNDERSTAND_CONTRACT` | Numbered: inputs → outputs → preconditions → postconditions → error cases → side effects |
+| `DEBUG_ERROR` | Starts immediately with Root cause — no preamble; numbered: root cause → why → evidence → fix → prevention |
+| `NULL_SAFETY` | Numbered: null sources → unchecked paths → risk severity → fixes |
+| `UNDERSTAND_BUSINESS_RULE` | Plain English paragraphs only — no headings, no numbered lists; written for a product manager |
+| `FIND_ENDPOINTS` | Markdown table always: Method / Path / Auth / Request / Response; grouped by controller |
+| `FIND_TESTS` | Numbered: covered scenarios → edge cases → gaps → quality assessment → recommendations |
+
+**Verbosity levels** override the intent guidance for length:
+- `SHORT` — uses a completely separate minimal prompt; no `BASE_SYSTEM`, no intent guidance; 3-5 sentences, no structure
+- `DETAILED` — `BASE_SYSTEM` + intent guidance (default)
+- `DEEP_DIVE` — `BASE_SYSTEM` + intent guidance + extension block covering edge cases, performance, architecture observations
 
 ---
 

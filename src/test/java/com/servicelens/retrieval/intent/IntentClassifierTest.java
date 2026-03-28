@@ -74,7 +74,11 @@ class IntentClassifierTest {
                 "what does checkout call",
                 "downstream calls from handleOrder",
                 "what happens after processOrder is called",
-                "show the execution flow of validateCart"
+                "show the execution flow of validateCart",
+                // new: flow / walk-through / execution path variants
+                "what is the payment flow",
+                "walk me through the checkout process",
+                "what is the execution path for order submission"
         })
         @DisplayName("Should classify call chain trace queries")
         void shouldClassifyCallChainQueries(String query) {
@@ -96,7 +100,10 @@ class IntentClassifierTest {
                 "callers of validateOrder",
                 "what calls this method",
                 "find callers of createInvoice",
-                "which methods call sendEmail"
+                "which methods call sendEmail",
+                // new: "where does" and "who invokes" variants
+                "where does processPayment get called",
+                "who invokes validateOrder"
         })
         @DisplayName("Should classify caller-lookup queries")
         void shouldClassifyCallerQueries(String query) {
@@ -162,7 +169,11 @@ class IntentClassifierTest {
                 "getting StackOverflowError in recursive call",
                 "ClassCastException when loading user",
                 "application throws exception on startup",
-                "why does payment fail with an error"
+                "why does payment fail with an error",
+                // new: "not working" / "isn't working" / "doesn't work" variants
+                "the payment service is not working",
+                "checkout isn't working properly",
+                "authentication doesn't work for new users"
         })
         @DisplayName("Should classify error/exception debug queries")
         void shouldClassifyDebugQueries(String query) {
@@ -248,7 +259,9 @@ class IntentClassifierTest {
                 "list all API routes",
                 "what HTTP endpoints does this service expose",
                 "find all controller endpoints",
-                "show me all GET mappings"
+                "show me all GET mappings",
+                // new: plural "apis" variant
+                "show me all the APIs this service exposes"
         })
         @DisplayName("Should classify REST endpoint queries")
         void shouldClassifyEndpointQueries(String query) {
