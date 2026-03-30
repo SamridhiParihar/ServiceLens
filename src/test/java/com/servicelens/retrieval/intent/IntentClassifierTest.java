@@ -165,8 +165,8 @@ class IntentClassifierTest {
 
         @ParameterizedTest(name = "classify(''{0}'') == DEBUG_ERROR")
         @ValueSource(strings = {
-                "NullPointerException in checkout flow",
-                "getting StackOverflowError in recursive call",
+                "NullPointerException in checkout handler",
+                "getting a RuntimeException during order processing",
                 "ClassCastException when loading user",
                 "application throws exception on startup",
                 "why does payment fail with an error",
@@ -334,9 +334,9 @@ class IntentClassifierTest {
     class ClassifyWithConfidenceTests {
 
         @Test
-        @DisplayName("Should return non-null IntentResult for any query")
+        @DisplayName("Should return non-null IntentClassificationResult for any query")
         void shouldReturnNonNullResult() {
-            IntentClassifier.IntentResult result = classifier.classifyWithConfidence("who calls validateOrder");
+            IntentClassificationResult result = classifier.classifyWithConfidence("who calls validateOrder");
             assertThat(result).isNotNull();
             assertThat(result.intent()).isNotNull();
         }
@@ -344,7 +344,7 @@ class IntentClassifierTest {
         @Test
         @DisplayName("Confidence should be between 0.0 and 1.0 inclusive")
         void confidenceShouldBeInRange() {
-            IntentClassifier.IntentResult result =
+            IntentClassificationResult result =
                     classifier.classifyWithConfidence("what breaks if I change OrderService");
             assertThat(result.confidence())
                     .isGreaterThanOrEqualTo(0.0f)
@@ -354,20 +354,51 @@ class IntentClassifierTest {
         @Test
         @DisplayName("Multi-keyword query should have higher confidence than single-keyword")
         void multiKeywordShouldHaveHigherConfidence() {
-            IntentClassifier.IntentResult single =
+            IntentClassificationResult single =
                     classifier.classifyWithConfidence("callers of processPayment");
-            IntentClassifier.IntentResult multi =
+            IntentClassificationResult multi =
                     classifier.classifyWithConfidence("find callers of processPayment who calls it");
 
             assertThat(multi.confidence()).isGreaterThanOrEqualTo(single.confidence());
         }
 
         @Test
-        @DisplayName("Empty query should return low-confidence FIND_IMPLEMENTATION")
+        @DisplayName("Empty query should return LOW confidence (0.3) for FIND_IMPLEMENTATION")
         void emptyQueryShouldReturnLowConfidence() {
-            IntentClassifier.IntentResult result = classifier.classifyWithConfidence("");
+            IntentClassificationResult result = classifier.classifyWithConfidence("");
             assertThat(result.intent()).isEqualTo(QueryIntent.FIND_IMPLEMENTATION);
-            assertThat(result.confidence()).isLessThanOrEqualTo(0.6f);
+            assertThat(result.confidence()).isEqualTo(0.3f);
+            assertThat(result.isLow()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Query with no matching patterns should return LOW confidence (0.3)")
+        void unknownQueryShouldReturnLowConfidence() {
+            IntentClassificationResult result =
+                    classifier.classifyWithConfidence("xyzzy_unknown_pattern_12345");
+            assertThat(result.confidence()).isEqualTo(0.3f);
+            assertThat(result.isLow()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Single-pattern match should return MEDIUM confidence")
+        void singleMatchShouldBeMediumConfidence() {
+            // "callers of" matches exactly one TRACE_CALLERS pattern
+            IntentClassificationResult result =
+                    classifier.classifyWithConfidence("callers of processPayment");
+            assertThat(result.isMedium()).isTrue();
+            assertThat(result.confidence()).isGreaterThanOrEqualTo(0.50f);
+            assertThat(result.confidence()).isLessThanOrEqualTo(0.75f);
+        }
+
+        @Test
+        @DisplayName("HIGH confidence result should pass isHigh() check")
+        void highConfidenceResult() {
+            // "who calls" + "callers of" both match TRACE_CALLERS → 2 hits → 0.80 (HIGH)
+            IntentClassificationResult result =
+                    classifier.classifyWithConfidence("who calls processPayment — find callers of validateOrder too");
+            assertThat(result.confidence()).isGreaterThan(0.75f);
+            assertThat(result.isHigh()).isTrue();
         }
     }
 }

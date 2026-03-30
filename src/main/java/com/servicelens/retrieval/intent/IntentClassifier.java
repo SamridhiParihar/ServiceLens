@@ -151,6 +151,8 @@ public class IntentClassifier {
 
     /**
      * Classify a query into a QueryIntent.
+     * Returns the best-guess intent with no confidence information.
+     * Use {@link #classifyWithConfidence(String)} when routing decisions depend on certainty.
      */
     public QueryIntent classify(String query) {
         if (query == null || query.isBlank()) {
@@ -191,12 +193,21 @@ public class IntentClassifier {
      * Classify with confidence — returns the intent plus a score indicating
      * how confident we are in the classification.
      *
-     * Confidence is based on how many patterns matched (more = more confident)
-     * and the priority of the matched intent.
+     * <p>Confidence tiers:
+     * <ul>
+     *   <li>0 pattern matches → 0.30 (LOW  — no signal, pure default)</li>
+     *   <li>1 pattern match   → 0.65 (MEDIUM — single signal, probably right)</li>
+     *   <li>2+ pattern matches → 0.80+ (HIGH — multiple signals, confident)</li>
+     * </ul>
+     *
+     * <p>{@link IntentBasedRetriever} uses the confidence tier to decide routing:
+     * LOW routes to {@link QueryIntent#GENERAL_UNDERSTANDING}; MEDIUM appends a
+     * clarification footer to the answer.
      */
-    public IntentResult classifyWithConfidence(String query) {
+    public IntentClassificationResult classifyWithConfidence(String query) {
         if (query == null || query.isBlank()) {
-            return new IntentResult(QueryIntent.FIND_IMPLEMENTATION, 0.5f);
+            // Empty query — no signal at all, LOW confidence
+            return new IntentClassificationResult(QueryIntent.FIND_IMPLEMENTATION, 0.3f);
         }
 
         String queryLower = query.toLowerCase().trim();
@@ -223,16 +234,15 @@ public class IntentClassifier {
             }
         }
 
-        // Confidence: more pattern matches = higher confidence
-        float confidence = Math.min(0.5f + (matchCount * 0.15f), 1.0f);
+        // 0 matches → LOW (0.30); otherwise scale from MEDIUM upward
+        float confidence = (matchCount == 0)
+                ? 0.30f
+                : Math.min(0.50f + (matchCount * 0.15f), 1.0f);
 
-        return new IntentResult(firstMatch, confidence);
+        return new IntentClassificationResult(firstMatch, confidence);
     }
 
     private String truncate(String text, int maxLen) {
         return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
-
-    /** Result with confidence score */
-    public record IntentResult(QueryIntent intent, float confidence) {}
 }

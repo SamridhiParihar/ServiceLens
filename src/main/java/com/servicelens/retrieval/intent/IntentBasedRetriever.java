@@ -73,15 +73,31 @@ public class IntentBasedRetriever {
 
     /**
      * Primary entry point.
-     * Classify the query, route to the right strategy, return rich context.
+     * Classify the query, apply confidence-based routing, return rich context.
+     *
+     * <p>Routing tiers:
+     * <ul>
+     *   <li>HIGH confidence (&gt;0.75)  — route to the classified intent as normal</li>
+     *   <li>MEDIUM confidence (0.5–0.75) — route normally; {@link QueryController} will
+     *       append a clarification footer to the answer</li>
+     *   <li>LOW confidence (&lt;0.5)    — override to {@link QueryIntent#GENERAL_UNDERSTANDING};
+     *       broad vector search with a general-purpose prompt</li>
+     * </ul>
      */
     public RetrievalResult retrieve(String query, String serviceName) {
-        IntentClassifier.IntentResult intentResult = classifier.classifyWithConfidence(query);
+        IntentClassificationResult intentResult = classifier.classifyWithConfidence(query);
         QueryIntent intent = intentResult.intent();
         float confidence   = intentResult.confidence();
 
-        log.info("Query: '{}' → intent: {} ({:.0f}%)",
-                truncate(query, 60), intent, confidence * 100);
+        // LOW confidence: no pattern matched reliably — use broad fallback
+        if (intentResult.isLow()) {
+            log.info("Low confidence ({:.0f}%) for query '{}' — routing to GENERAL_UNDERSTANDING",
+                    confidence * 100, truncate(query, 60));
+            intent = QueryIntent.GENERAL_UNDERSTANDING;
+        } else {
+            log.info("Query: '{}' → intent: {} ({:.0f}%)",
+                    truncate(query, 60), intent, confidence * 100);
+        }
 
         return switch (intent) {
             case FIND_IMPLEMENTATION   -> handleFindImplementation(query, serviceName, confidence);
@@ -95,6 +111,7 @@ public class IntentBasedRetriever {
             case UNDERSTAND_BUSINESS_RULE -> handleBusinessRule(query, serviceName, confidence);
             case FIND_ENDPOINTS        -> handleFindEndpoints(serviceName, confidence);
             case FIND_TESTS            -> handleFindTests(query, serviceName, confidence);
+            case GENERAL_UNDERSTANDING -> handleGeneralUnderstanding(query, serviceName, confidence);
         };
     }
 
@@ -387,6 +404,26 @@ public class IntentBasedRetriever {
         log.debug("FIND_TESTS: {} test chunks", testDocs.size());
 
         return RetrievalResult.semantic(QueryIntent.FIND_TESTS, confidence, testDocs);
+    }
+
+    /**
+     * GENERAL_UNDERSTANDING — LOW-confidence fallback.
+     * "tell me about this service" / anything that didn't match a specific pattern
+     *
+     * Broad vector search across all chunk types, no graph traversal.
+     * The LLM receives a general-purpose prompt with no rigid format.
+     */
+    private RetrievalResult handleGeneralUnderstanding(
+            String query, String serviceName, float confidence) {
+
+        // Broad search — all chunk types, higher top-K to give LLM maximum context
+        List<Document> candidates = vectorRetriever.retrieve(query, serviceName, 20);
+        List<Document> reranked   = reranker.metadataRerank(query, candidates, 10);
+
+        log.debug("GENERAL_UNDERSTANDING: {} candidates → {} after rerank",
+                candidates.size(), reranked.size());
+
+        return RetrievalResult.semantic(QueryIntent.GENERAL_UNDERSTANDING, confidence, reranked);
     }
 
     // ═══════════════════════════════════════════════════════════════════════

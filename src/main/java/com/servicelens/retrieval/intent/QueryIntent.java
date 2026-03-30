@@ -119,5 +119,18 @@ public enum QueryIntent {
      *
      * Strategy: Vector search restricted to chunk_type = TEST
      */
-    FIND_TESTS
+    FIND_TESTS,
+
+    /**
+     * Fallback intent used when classifier confidence is LOW (&lt;0.5).
+     *
+     * <p>No patterns matched the query with sufficient certainty, so the classifier
+     * cannot commit to a specific retrieval strategy. This intent triggers a broad
+     * vector search across all chunk types, giving the LLM maximum context and
+     * a general-purpose explanation prompt.
+     *
+     * <p>This intent is never returned directly by {@link IntentClassifier} — it is
+     * injected by {@link IntentBasedRetriever} when the confidence score is too low.
+     */
+    GENERAL_UNDERSTANDING
 }

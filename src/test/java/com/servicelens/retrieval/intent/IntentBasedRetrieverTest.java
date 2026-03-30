@@ -1,6 +1,7 @@
 package com.servicelens.retrieval.intent;
 
 import com.servicelens.graph.KnowledgeGraphService;
+import com.servicelens.retrieval.intent.IntentClassificationResult;
 import com.servicelens.graph.domain.ClassNode;
 import com.servicelens.graph.domain.MethodNode;
 import com.servicelens.graph.repository.MethodNodeRepository;
@@ -449,7 +450,7 @@ class IntentBasedRetrieverTest {
 
     private void stubIntent(QueryIntent intent) {
         when(classifier.classifyWithConfidence(anyString()))
-                .thenReturn(new IntentClassifier.IntentResult(intent, CONFIDENCE));
+                .thenReturn(new IntentClassificationResult(intent, CONFIDENCE));
     }
 
     private static Document codeDoc(String content) {

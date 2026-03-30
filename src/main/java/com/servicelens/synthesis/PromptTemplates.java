@@ -274,6 +274,20 @@ public final class PromptTemplates {
                     behaviour or implementation details?
                     5. **Recommendations** — suggest specific test cases that should be added
                     """;
+
+            case GENERAL_UNDERSTANDING -> """
+                    ## Intent: General Understanding (low-confidence classification)
+                    The query did not match a specific intent pattern confidently. \
+                    Answer as helpfully as possible using the provided context.
+                    - Explain what the relevant code does in clear, structured language.
+                    - If the question is broad, cover the most likely aspects the developer \
+                    is asking about — what the code does, how it fits into the service, \
+                    and any notable design choices visible in the context.
+                    - Use whatever format best suits the answer — prose, numbered steps, \
+                    or a short list. Do not force a rigid structure.
+                    - If the provided context does not contain enough information to answer \
+                    confidently, say so clearly rather than guessing.
+                    """;
         };
     }
 }

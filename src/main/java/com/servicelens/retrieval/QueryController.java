@@ -132,18 +132,32 @@ public class QueryController {
         RetrievalResult retrieval = retriever.retrieve(request.query(), request.serviceName());
         SynthesisResult synthesis = synthesizer.synthesize(request.query(), retrieval, history, verbosity);
 
+        // ── Confidence-aware footer ───────────────────────────────────────────
+        // MEDIUM confidence (0.5–0.75): classifier picked an intent but wasn't sure.
+        // Append a small hint so the user knows they can rephrase if the answer misses.
+        String finalAnswer = withConfidenceFooter(synthesis);
+
         // ── Persist the completed turn ────────────────────────────────────────
         sessionService.addTurn(
                 session.sessionId(),
                 request.query(),
                 synthesis.intent().name(),
-                synthesis.answer(),
+                finalAnswer,
                 verbosity.name());
 
-        log.debug("Ask complete: synthesized={} intent={} sessionId={}",
-                synthesis.synthesized(), synthesis.intent(), session.sessionId());
+        log.debug("Ask complete: synthesized={} intent={} confidence={:.0f}% sessionId={}",
+                synthesis.synthesized(), synthesis.intent(),
+                synthesis.intentConfidence() * 100, session.sessionId());
 
-        return ResponseEntity.ok(AskResponse.from(synthesis, retrieval, session.sessionId()));
+        return ResponseEntity.ok(new AskResponse(
+                finalAnswer,
+                synthesis.synthesized(),
+                synthesis.intent().name(),
+                synthesis.intentConfidence(),
+                synthesis.modelUsed(),
+                synthesis.contextChunksUsed(),
+                QueryResponse.from(retrieval),
+                session.sessionId().toString()));
     }
 
     /**
@@ -161,6 +175,30 @@ public class QueryController {
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid sessionId format");
         }
+    }
+
+    // ── Confidence footer ─────────────────────────────────────────────────────
+
+    /**
+     * Appends a clarification hint to the answer when classifier confidence is MEDIUM (0.5–0.75).
+     *
+     * <p>HIGH confidence (&gt;0.75): return answer unchanged — we're confident in the intent.<br>
+     * MEDIUM confidence (0.5–0.75): append a small footer so the user knows the intent was
+     * a best guess and they can rephrase if the answer missed the mark.<br>
+     * LOW confidence (&lt;0.5): routing already switched to GENERAL_UNDERSTANDING in the
+     * retriever, so no footer is needed here.
+     */
+    private static String withConfidenceFooter(SynthesisResult synthesis) {
+        float confidence = synthesis.intentConfidence();
+        if (confidence >= 0.50f && confidence <= 0.75f) {
+            String intentLabel = synthesis.intent().name()
+                    .replace("_", " ")
+                    .toLowerCase();
+            return synthesis.answer()
+                    + "\n\n---\n*Detected intent: **" + intentLabel
+                    + "** — if this missed the mark, try rephrasing your question more specifically.*";
+        }
+        return synthesis.answer();
     }
 
     // ── Validation ────────────────────────────────────────────────────────────

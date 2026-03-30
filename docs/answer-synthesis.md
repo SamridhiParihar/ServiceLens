@@ -73,11 +73,18 @@ The base instruction has **no global Response Format section** — format is ful
 | `UNDERSTAND_BUSINESS_RULE` | Plain English paragraphs only — no headings, no numbered lists; written for a product manager |
 | `FIND_ENDPOINTS` | Markdown table always: Method / Path / Auth / Request / Response; grouped by controller |
 | `FIND_TESTS` | Numbered: covered scenarios → edge cases → gaps → quality assessment → recommendations |
+| `GENERAL_UNDERSTANDING` | Flexible — prose, list, or numbered; no rigid structure; used when intent is uncertain |
 
 **Verbosity levels** override the intent guidance for length:
 - `SHORT` — uses a completely separate minimal prompt; no `BASE_SYSTEM`, no intent guidance; 3-5 sentences, no structure
 - `DETAILED` — `BASE_SYSTEM` + intent guidance (default)
 - `DEEP_DIVE` — `BASE_SYSTEM` + intent guidance + extension block covering edge cases, performance, architecture observations
+
+**Confidence-aware answer modification:**
+- **MEDIUM confidence (0.50–0.75):** `QueryController` appends a clarification footer after synthesis:
+  *"Detected intent: X — if this missed the mark, try rephrasing your question more specifically."*
+- **LOW confidence (< 0.50):** Routing overrides to `GENERAL_UNDERSTANDING` before synthesis; no footer added.
+- **HIGH confidence (> 0.75):** Answer returned unchanged.
 
 ---
 

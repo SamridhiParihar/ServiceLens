@@ -2,7 +2,7 @@
 
 ## Overview
 
-ServiceLens uses **intent-based retrieval** — before searching the knowledge stores, every query is classified into one of 11 intents. The intent determines exactly which combination of vector search, graph traversal, and reranking is applied. This means a question like "who calls processPayment?" triggers a completely different retrieval strategy than "what does the PaymentService do?"
+ServiceLens uses **intent-based retrieval** — before searching the knowledge stores, every query is classified into one of 12 intents. The intent determines exactly which combination of vector search, graph traversal, and reranking is applied. This means a question like "who calls processPayment?" triggers a completely different retrieval strategy than "what does the PaymentService do?"
 
 ---
 
@@ -15,15 +15,18 @@ Pattern-based classifier using regex + substring matching. No LLM call required 
 **How it works:**
 1. Query text is matched against a priority-ordered map of patterns (most specific intents first)
 2. Each pattern match increments a hit count
-3. Confidence = `0.5 + 0.15 × hitCount`, capped at `1.0`
-4. Intent with the most pattern hits wins
+3. Confidence formula:
+   - **0 matches** → `0.30` (LOW — no signal, pure default fallback)
+   - **1 match** → `0.65` (MEDIUM — one signal, probably right)
+   - **2+ matches** → `0.80+` (HIGH — multiple signals, confident), capped at `1.0`
+4. The first-matched intent wins (priority ordering ensures specificity)
 
 **Why not LLM-based classification?**
 An LLM classifier would add ~500ms latency on every query. Since intents are well-defined engineering concepts with predictable vocabulary, regex is sufficient and ~500× faster.
 
 ---
 
-## The 11 Intents
+## The 12 Intents
 
 | Intent | Example Query | Primary Signal Words |
 |---|---|---|
@@ -38,6 +41,9 @@ An LLM classifier would add ~500ms latency on every query. Since intents are wel
 | `UNDERSTAND_BUSINESS_RULE` | "What is the business rule for discount eligibility?" | business rule, business logic, why, requirement, policy |
 | `FIND_ENDPOINTS` | "What REST endpoints does OrderController expose?" | endpoint, apis, REST, route, controller, mapping, what urls |
 | `FIND_TESTS` | "Are there tests for the payment flow?" | test, spec, unit test, integration test, test coverage |
+| `GENERAL_UNDERSTANDING` | *(injected automatically — never matched by patterns)* | N/A — triggered when confidence < 0.5 |
+
+> **Note:** `GENERAL_UNDERSTANDING` is never returned directly by `IntentClassifier`. It is injected by `IntentBasedRetriever` when the confidence score falls below `0.50` — meaning no specific intent could be determined reliably.
 
 ---
 
@@ -96,6 +102,38 @@ An LLM classifier would add ~500ms latency on every query. Since intents are wel
 ### `FIND_TESTS`
 1. Vector search: TEST chunks only, topK=15
 2. Return: `semanticMatches`
+
+### `GENERAL_UNDERSTANDING` (low-confidence fallback)
+1. Broad vector search: ALL chunk types, topK=20, threshold=0.35
+2. Metadata rerank: top 10 returned
+3. No graph traversal — maximise context breadth
+4. Return: `semanticMatches`
+
+---
+
+## Confidence-aware Routing
+
+`IntentBasedRetriever` applies three different behaviours based on the confidence tier:
+
+| Tier | Range | Behaviour |
+|---|---|---|
+| **HIGH** | > 0.75 | Route to classified intent; answer returned as-is |
+| **MEDIUM** | 0.50 – 0.75 | Route to classified intent; a clarification footer is appended to the answer: *"Detected intent: X — if this missed the mark, try rephrasing…"* |
+| **LOW** | < 0.50 | Override intent to `GENERAL_UNDERSTANDING`; broad retrieval, general-purpose prompt |
+
+The confidence footer for MEDIUM tier is added in `QueryController` (not the retriever), so it appears in the final `/api/ask` response but is stored in session history.
+
+### `IntentClassificationResult`
+
+Standalone record wrapping the classification output:
+
+```java
+record IntentClassificationResult(QueryIntent intent, float confidence) {
+    boolean isHigh()   // > 0.75
+    boolean isMedium() // 0.50 – 0.75
+    boolean isLow()    // < 0.50
+}
+```
 
 ---
 
