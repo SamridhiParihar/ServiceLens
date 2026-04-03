@@ -98,6 +98,18 @@ public class RetrievalReranker {
         String chunkType = getMetaString(doc, "chunk_type");
         String language  = getMetaString(doc, "language");
 
+        // ── Element / class name exact match — strongest signal ────────────
+        // When the query contains the method or class name, that chunk is
+        // almost certainly the one the user is asking about.
+        String elementName = getMetaString(doc, "element_name");
+        if (elementName != null && queryLower.contains(elementName.toLowerCase())) {
+            score += 0.30;
+        }
+        String className = getMetaString(doc, "class_name");
+        if (className != null && queryLower.contains(className.toLowerCase())) {
+            score += 0.15;
+        }
+
         // ── Query intent → chunk type alignment ──────────────────────────
 
         // Config queries → boost CONFIG chunks

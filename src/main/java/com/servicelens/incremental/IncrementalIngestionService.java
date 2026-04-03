@@ -258,10 +258,15 @@ public class IncrementalIngestionService {
 
                 graphService.saveFileResult(result);
 
-                log.debug("Processed Java: {} → {} chunks, {} graph nodes",
-                        file.getFileName(),
-                        result.chunks().size(),
-                        result.classNodes().size() + result.methodNodes().size());
+                if (result.chunks().isEmpty() && result.classNodes().isEmpty()) {
+                    log.warn("Java: {} → 0 chunks, 0 classes — file may have failed to parse",
+                            file.getFileName());
+                } else {
+                    log.debug("Processed Java: {} → {} chunks, {} graph nodes",
+                            file.getFileName(),
+                            result.chunks().size(),
+                            result.classNodes().size() + result.methodNodes().size());
+                }
 
             } else {
                 processors.stream()

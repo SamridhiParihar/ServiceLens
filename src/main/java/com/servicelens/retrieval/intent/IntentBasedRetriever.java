@@ -91,12 +91,12 @@ public class IntentBasedRetriever {
 
         // LOW confidence: no pattern matched reliably — use broad fallback
         if (intentResult.isLow()) {
-            log.info("Low confidence ({:.0f}%) for query '{}' — routing to GENERAL_UNDERSTANDING",
-                    confidence * 100, truncate(query, 60));
+            log.info("Low confidence ({}%) for query '{}' — routing to GENERAL_UNDERSTANDING",
+                    (int)(confidence * 100), truncate(query, 60));
             intent = QueryIntent.GENERAL_UNDERSTANDING;
         } else {
-            log.info("Query: '{}' → intent: {} ({:.0f}%)",
-                    truncate(query, 60), intent, confidence * 100);
+            log.info("Query: '{}' → intent: {} ({}%)",
+                    truncate(query, 60), intent, (int)(confidence * 100));
         }
 
         return switch (intent) {

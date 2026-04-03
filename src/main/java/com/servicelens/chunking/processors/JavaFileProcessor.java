@@ -161,7 +161,7 @@ public class JavaFileProcessor implements FileProcessor {
             });
 
         } catch (Exception e) {
-            log.warn("Failed to parse: {} — {}", file.getFileName(), e.getMessage());
+            log.warn("Failed to process: {} — {}", file.getFileName(), e.getMessage());
         }
 
         return new JavaFileResult(chunks, docChunks, classNodes, methodNodes,
@@ -196,11 +196,16 @@ public class JavaFileProcessor implements FileProcessor {
         String classLevelMapping = extractClassLevelMapping(classDecl);
 
         classDecl.getMethods().forEach(method -> {
-            MethodNode methodNode = processMethod(method, classDecl, qualifiedName,
-                    packageName, file, serviceName, importMap, classLevelMapping,
-                    isTest, classDoc, chunks, docChunks, allCfgNodes, dataFlows);
-            classNode.getMethods().add(methodNode);
-            methodNodes.add(methodNode);
+            try {
+                MethodNode methodNode = processMethod(method, classDecl, qualifiedName,
+                        packageName, file, serviceName, importMap, classLevelMapping,
+                        isTest, classDoc, chunks, docChunks, allCfgNodes, dataFlows);
+                classNode.getMethods().add(methodNode);
+                methodNodes.add(methodNode);
+            } catch (Exception e) {
+                log.warn("Skipped method '{}' in '{}': {}",
+                        method.getNameAsString(), className, e.getMessage());
+            }
         });
 
         classDecl.getConstructors().forEach(ctor ->
@@ -248,11 +253,16 @@ public class JavaFileProcessor implements FileProcessor {
         });
 
         ifaceDecl.getMethods().forEach(method -> {
-            MethodNode mn = processMethod(method, ifaceDecl, qualifiedName,
-                    packageName, file, serviceName, importMap, "", false,
-                    classDoc, chunks, docChunks, allCfgNodes, dataFlows);
-            ifaceNode.getMethods().add(mn);
-            methodNodes.add(mn);
+            try {
+                MethodNode mn = processMethod(method, ifaceDecl, qualifiedName,
+                        packageName, file, serviceName, importMap, "", false,
+                        classDoc, chunks, docChunks, allCfgNodes, dataFlows);
+                ifaceNode.getMethods().add(mn);
+                methodNodes.add(mn);
+            } catch (Exception e) {
+                log.warn("Skipped interface method '{}' in '{}': {}",
+                        method.getNameAsString(), ifaceName, e.getMessage());
+            }
         });
 
         classNodes.add(ifaceNode);

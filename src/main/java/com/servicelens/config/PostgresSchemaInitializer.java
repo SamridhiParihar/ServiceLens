@@ -60,7 +60,30 @@ public class PostgresSchemaInitializer {
                     )
                     """);
 
-            log.info("PostgreSQL schema initialised (service_registry, conversation_sessions ready)");
+            // conversation_turn_embeddings — stores per-turn pgvector embeddings for
+            // hybrid (RAG + sliding window) conversation memory retrieval.
+            // Requires the pgvector extension and a vector(768) column matching the
+            // nomic-embed-text model output dimension.
+            jdbc.execute("""
+                    CREATE TABLE IF NOT EXISTS conversation_turn_embeddings (
+                        session_id   UUID        NOT NULL,
+                        turn_index   INT         NOT NULL,
+                        query_text   TEXT        NOT NULL,
+                        answer_text  TEXT        NOT NULL,
+                        embedding    vector(768) NOT NULL,
+                        PRIMARY KEY (session_id, turn_index)
+                    )
+                    """);
+
+            // HNSW index for fast approximate nearest-neighbour search scoped to a session.
+            // Only created if it does not already exist — idempotent across restarts.
+            jdbc.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_turn_embeddings_hnsw
+                        ON conversation_turn_embeddings
+                        USING hnsw (embedding vector_cosine_ops)
+                    """);
+
+            log.info("PostgreSQL schema initialised (service_registry, conversation_sessions, conversation_turn_embeddings ready)");
         };
     }
 }

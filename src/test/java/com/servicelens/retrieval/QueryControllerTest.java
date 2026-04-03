@@ -10,6 +10,7 @@ import com.servicelens.retrieval.intent.RetrievalResult;
 import com.servicelens.session.ConversationSession;
 import com.servicelens.session.ConversationSessionService;
 import com.servicelens.session.ConversationTurn;
+import com.servicelens.session.HybridMemoryAssembler;
 import com.servicelens.synthesis.AnswerSynthesizer;
 import com.servicelens.synthesis.SynthesisResult;
 import com.servicelens.synthesis.VerbosityLevel;
@@ -62,6 +63,9 @@ class QueryControllerTest {
     @MockitoBean
     private ConversationSessionService sessionService;
 
+    @MockitoBean
+    private HybridMemoryAssembler hybridMemory;
+
     private static final String URL      = "/api/query";
     private static final String ASK_URL  = "/api/ask";
     private static final UUID   TEST_SID = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -72,6 +76,7 @@ class QueryControllerTest {
                 TEST_SID, "order-svc", List.of(), Instant.now(), Instant.now());
         lenient().when(sessionService.getOrCreate(any(), any())).thenReturn(session);
         lenient().doNothing().when(sessionService).addTurn(any(), any(), any(), any(), any());
+        lenient().when(hybridMemory.assemble(any(), any(), any())).thenReturn(List.of());
     }
 
     // ── Happy-path — semantic result ──────────────────────────────────────────

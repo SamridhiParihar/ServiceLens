@@ -27,13 +27,16 @@ import static org.mockito.Mockito.*;
 class ConversationSessionServiceTest {
 
     @Mock
-    private ConversationSessionRepository repository;
+    private ConversationSessionRepository  repository;
+
+    @Mock
+    private ConversationTurnEmbeddingStore embeddingStore;
 
     private ConversationSessionService service;
 
     @BeforeEach
     void setUp() {
-        service = new ConversationSessionService(repository);
+        service = new ConversationSessionService(repository, embeddingStore);
     }
 
     // ── getOrCreate ───────────────────────────────────────────────────────────
@@ -156,6 +159,7 @@ class ConversationSessionServiceTest {
         void appendsTurnWithTruncatedSummary() {
             UUID sessionId = UUID.randomUUID();
             String longAnswer = "A".repeat(600);
+            when(repository.appendTurn(eq(sessionId), any())).thenReturn(0);
 
             service.addTurn(sessionId, "how does X work?", "FIND_IMPLEMENTATION", longAnswer, "DETAILED");
 
@@ -174,6 +178,7 @@ class ConversationSessionServiceTest {
         void shortAnswer_storedAsIs() {
             UUID sessionId = UUID.randomUUID();
             String shortAnswer = "The loop runs 3 times.";
+            when(repository.appendTurn(eq(sessionId), any())).thenReturn(0);
 
             service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", shortAnswer, "SHORT");
 
@@ -188,6 +193,7 @@ class ConversationSessionServiceTest {
         @DisplayName("Handles null answer gracefully")
         void nullAnswer_storesEmptySummary() {
             UUID sessionId = UUID.randomUUID();
+            when(repository.appendTurn(eq(sessionId), any())).thenReturn(0);
 
             service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", null, "DEEP_DIVE");
 
@@ -196,6 +202,28 @@ class ConversationSessionServiceTest {
 
             assertThat(captor.getValue().answerSummary()).isEmpty();
             assertThat(captor.getValue().verbosity()).isEqualTo("DEEP_DIVE");
+        }
+
+        @Test
+        @DisplayName("Calls embedding store with session_id, turn_index, query and summary")
+        void callsEmbeddingStoreAfterAppend() {
+            UUID sessionId = UUID.randomUUID();
+            when(repository.appendTurn(eq(sessionId), any())).thenReturn(2); // turn index 2
+
+            service.addTurn(sessionId, "what calls checkout?", "TRACE_CALLERS", "PaymentService calls it.", "DETAILED");
+
+            verify(embeddingStore).store(sessionId, 2, "what calls checkout?", "PaymentService calls it.");
+        }
+
+        @Test
+        @DisplayName("Does not call embedding store when session not found (appendTurn returns -1)")
+        void sessionNotFound_skipsEmbeddingStore() {
+            UUID sessionId = UUID.randomUUID();
+            when(repository.appendTurn(eq(sessionId), any())).thenReturn(-1);
+
+            service.addTurn(sessionId, "query", "FIND_IMPLEMENTATION", "answer", "DETAILED");
+
+            verify(embeddingStore, never()).store(any(), anyInt(), anyString(), anyString());
         }
     }
 

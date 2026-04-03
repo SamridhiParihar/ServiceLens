@@ -8,6 +8,7 @@ import com.servicelens.retrieval.intent.RetrievalResult;
 import com.servicelens.session.ConversationSession;
 import com.servicelens.session.ConversationSessionService;
 import com.servicelens.session.ConversationTurn;
+import com.servicelens.session.HybridMemoryAssembler;
 import com.servicelens.synthesis.AnswerSynthesizer;
 import com.servicelens.synthesis.SynthesisResult;
 import com.servicelens.synthesis.VerbosityLevel;
@@ -70,16 +71,19 @@ public class QueryController {
 
     private static final Logger log = LoggerFactory.getLogger(QueryController.class);
 
-    private final IntentBasedRetriever      retriever;
-    private final AnswerSynthesizer         synthesizer;
+    private final IntentBasedRetriever       retriever;
+    private final AnswerSynthesizer          synthesizer;
     private final ConversationSessionService sessionService;
+    private final HybridMemoryAssembler      hybridMemory;
 
     public QueryController(IntentBasedRetriever retriever,
                            AnswerSynthesizer synthesizer,
-                           ConversationSessionService sessionService) {
+                           ConversationSessionService sessionService,
+                           HybridMemoryAssembler hybridMemory) {
         this.retriever      = retriever;
         this.synthesizer    = synthesizer;
         this.sessionService = sessionService;
+        this.hybridMemory   = hybridMemory;
     }
 
     /**
@@ -122,10 +126,10 @@ public class QueryController {
         ConversationSession session = sessionService.getOrCreate(
                 request.sessionId(), request.serviceName());
 
-        // Last 2 turns injected as conversation history
-        List<ConversationTurn> history = session.history().size() > 2
-                ? session.history().subList(session.history().size() - 2, session.history().size())
-                : session.history();
+        // Hybrid memory: RAG-retrieved relevant past turns + sliding window (last 2).
+        // Both layers are combined and deduplicated by HybridMemoryAssembler.
+        List<ConversationTurn> history = hybridMemory.assemble(
+                session.sessionId(), request.query(), session.history());
 
         // ── Retrieval + synthesis ─────────────────────────────────────────────
         VerbosityLevel verbosity = request.verbosity() != null ? request.verbosity() : VerbosityLevel.DETAILED;
@@ -145,7 +149,7 @@ public class QueryController {
                 finalAnswer,
                 verbosity.name());
 
-        log.debug("Ask complete: synthesized={} intent={} confidence={:.0f}% sessionId={}",
+        log.debug("Ask complete: synthesized={} intent={} confidence={}% sessionId={}",
                 synthesis.synthesized(), synthesis.intent(),
                 synthesis.intentConfidence() * 100, session.sessionId());
 

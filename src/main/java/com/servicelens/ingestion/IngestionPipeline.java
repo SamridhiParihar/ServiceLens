@@ -110,11 +110,16 @@ public class IngestionPipeline {
                         allMethodNodes.addAll(result.methodNodes());
                         allCfgNodes.addAll(result.cfgNodes());
                         allDataFlows.addAll(result.dataFlows());
-                        log.debug("Java: {} → {} chunks, {} doc chunks, {} classes, {} methods, {} cfg nodes",
-                                file.getFileName(),
-                                result.chunks().size(), result.documentationChunks().size(),
-                                result.classNodes().size(), result.methodNodes().size(),
-                                result.cfgNodes().size());
+                        if (result.chunks().isEmpty() && result.classNodes().isEmpty()) {
+                            log.warn("Java: {} → 0 chunks, 0 classes — file may have failed to parse",
+                                    file.getFileName());
+                        } else {
+                            log.debug("Java: {} → {} chunks, {} doc chunks, {} classes, {} methods, {} cfg nodes",
+                                    file.getFileName(),
+                                    result.chunks().size(), result.documentationChunks().size(),
+                                    result.classNodes().size(), result.methodNodes().size(),
+                                    result.cfgNodes().size());
+                        }
                         recordHash(file, currentHashes);
                     } else {
                         processors.stream()

@@ -71,7 +71,7 @@ public class IntentClassifier {
                             "what is triggered", "call chain", "call flow",
                             "execution flow", "what is called by", "sequence of calls",
                             "downstream", "what does.*invoke",
-                            "flow", "walk.*through", "execution path"
+                            "flow", "walk.*through.*(flow|process|chain|execution|steps)", "execution path"
                     )),
 
                     // ── TRACE_CALLERS — "who calls X" ─────────────────────────────

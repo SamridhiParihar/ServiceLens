@@ -81,16 +81,19 @@ public class ConversationSessionRepository {
      * Append a turn to the session history, capping at {@link #MAX_TURNS}.
      *
      * <p>If the session does not exist (e.g. has been deleted or never created),
-     * this is a no-op.</p>
+     * this is a no-op and {@code -1} is returned.</p>
      *
      * @param sessionId the target session
      * @param turn      the turn to append
+     * @return the 0-based index of the newly appended turn, or {@code -1} if the
+     *         session was not found
      */
-    public void appendTurn(UUID sessionId, ConversationTurn turn) {
+    public int appendTurn(UUID sessionId, ConversationTurn turn) {
         Optional<ConversationSession> existing = findById(sessionId);
-        if (existing.isEmpty()) return;
+        if (existing.isEmpty()) return -1;
 
         List<ConversationTurn> history = new ArrayList<>(existing.get().history());
+        int turnIndex = history.size();   // capture BEFORE adding — this is the new turn's index
         history.add(turn);
         if (history.size() > MAX_TURNS) {
             history = history.subList(history.size() - MAX_TURNS, history.size());
@@ -102,6 +105,8 @@ public class ConversationSessionRepository {
                  WHERE session_id = ?::uuid
                 """,
                 toJson(history), Timestamp.from(Instant.now()), sessionId.toString());
+
+        return turnIndex;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

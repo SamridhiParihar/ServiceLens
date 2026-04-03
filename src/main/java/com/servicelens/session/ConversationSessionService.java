@@ -38,10 +38,13 @@ public class ConversationSessionService {
     /** Max characters of an answer stored as the turn summary. */
     static final int SUMMARY_MAX_CHARS = 400;
 
-    private final ConversationSessionRepository repository;
+    private final ConversationSessionRepository    repository;
+    private final ConversationTurnEmbeddingStore   embeddingStore;
 
-    public ConversationSessionService(ConversationSessionRepository repository) {
-        this.repository = repository;
+    public ConversationSessionService(ConversationSessionRepository repository,
+                                      ConversationTurnEmbeddingStore embeddingStore) {
+        this.repository     = repository;
+        this.embeddingStore = embeddingStore;
     }
 
     /**
@@ -106,7 +109,14 @@ public class ConversationSessionService {
         String summary = (answer != null && answer.length() > SUMMARY_MAX_CHARS)
                 ? answer.substring(0, SUMMARY_MAX_CHARS)
                 : (answer != null ? answer : "");
-        repository.appendTurn(sessionId, new ConversationTurn(query, intent, summary, verbosity));
+
+        int turnIndex = repository.appendTurn(sessionId, new ConversationTurn(query, intent, summary, verbosity));
+
+        // Embed and store for RAG-based long-distance memory retrieval.
+        // turnIndex == -1 means the session was not found (no-op).
+        if (turnIndex >= 0) {
+            embeddingStore.store(sessionId, turnIndex, query, summary);
+        }
     }
 
     /**

@@ -78,7 +78,9 @@ class IntentClassifierTest {
                 // new: flow / walk-through / execution path variants
                 "what is the payment flow",
                 "walk me through the checkout process",
-                "what is the execution path for order submission"
+                "what is the execution path for order submission",
+                "walk me through the checkout process",
+                "walk me through the payment flow"
         })
         @DisplayName("Should classify call chain trace queries")
         void shouldClassifyCallChainQueries(String query) {
@@ -288,6 +290,13 @@ class IntentClassifierTest {
         @DisplayName("Should classify code-location queries")
         void shouldClassifyFindImplementationQueries(String query) {
             assertThat(classifier.classify(query)).isEqualTo(QueryIntent.FIND_IMPLEMENTATION);
+        }
+
+        @Test
+        @DisplayName("'walk me through what it does' should NOT route to TRACE_CALL_CHAIN")
+        void walkMeThroughWithoutFlowContext_isNotTraceCallChain() {
+            assertThat(classifier.classify("How does startAgent work? Walk me through what it does."))
+                    .isEqualTo(QueryIntent.FIND_IMPLEMENTATION);
         }
 
         @Test
